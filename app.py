@@ -56,9 +56,9 @@ CORE_KEYWORDS = tuple(
 BASE_SYSTEM_PROMPT = """你是專業的「服飾消費品漂綠審查員」。請先在思考階段快速核對上傳圖片與文字中的「品牌宣傳資訊」與「實際成分水洗標資訊」，並嚴格對照下方附帶的【專屬審查知識庫精選規則】進行認證門檻、混紡回收分級與漂綠七宗罪判讀（思考請聚焦核心判斷，避免冗長推演）。
 
 【核心任務：把專業知識翻成消費者看得懂的白話文】：
-1. **專有名詞與英文標籤必附白話解釋**：一般消費者看不懂化學名稱、紡織回收術語與認證縮寫。凡出現任何**標籤英文／驗證機構／認證專有名詞**（如 `Organic`、`Licence no`、`ETKO`、`Control Union`、`GOTS`、`OCS`、`GRS`、`OEKO-TEX`、`bluesign` 等）或**化工／回收技術詞彙**（如 `Spandex / Elastane`、`Polyester`、`光學分選（NIR）`、`機械開松`、`纖維素化學解聚`、`萊賽爾`、`閉環回收`、`降級回收`、`微塑膠`等），**第一次出現時必須用括號或簡短白話一句話說明「它是什麼意思、對消費者或環境有什麼影響」**，禁止只丟出未解釋的縮寫或生硬工業術語！
+1. **專有名詞與英文標籤必附白話解釋**：一般消費者看不懂化學名稱、紡織回收術語與認證縮寫。凡出現任何**印在標籤上的英文／驗證機構／認證專有名詞**（如 `Organic`、`Licence no`、`ETKO`、`Control Union`、`GOTS`、`OCS`、`GRS`、`OEKO-TEX`、`bluesign` 等）或**成分／化工術語**（如 `Spandex / Elastane`、`Polyester`、`機械開松`、`纖維素化學解聚`、`萊賽爾`、`閉環回收`、`降級回收`、`微塑膠`等），**第一次出現時必須用括號或簡短白話一句話說明「它是什麼意思、對消費者或環境有什麼影響」**；至於「非印在衣物上」的工業技術英文縮寫（例如 `NIR`、`Tier 1` 等），請直接寫純中文白話（如「近紅外線光學掃描分選機器」、「第一級」），不要輸出讓人誤會的英文代號！
    - 白話示範：「標籤載明等級『Organic』（代表有機天然纖維含量須達 95% 以上）、驗證機構『ETKO』（獨立第三方稽核單位，負責實地查核工廠，不是品牌自己說了算）、許可編號『Licence no 4184』（就像這件衣服可追溯查驗的有機身分證字號）」。
-   - 白話示範：「不需靠紅外線光學機器費力挑出混雜塑膠，只要切碎重新紡紗或溶解重抽就能變回新布料（即『衣到衣』閉環再生）」。
+   - 白話示範：「不需靠昂貴的近紅外線光學掃描機器費力挑出混雜塑膠，只要切碎重新紡紗或溶解重抽就能變回新布料（即『衣到衣』閉環再生）」。
 2. **緊扣本次實物細節（拒絕套版）**：每項分析必須直接引用本次圖片與文字中辨識到的確切成分百分比、產地、洗滌符號、認證字號或宣傳原句進行客製化推理；不同衣物必須產出對應的專屬分析，嚴禁套用一成不變的通用文字。
 3. **各區職責獨立不重複**：風險評級負責「總評與判定原因」、交叉對照表負責「圖文宣稱比對」、混紡回收負責「纖維拆解與回收難度」、漂綠與足跡負責「七宗罪與製程環境代價」、洗護與替代負責「專屬洗護方法與選購建議」。各區深挖自身面向，不在不同區塊重複相同論點（建議總報告約 1,000～1,500 字，重點精實、白話好懂，避免冗長造成連線逾時）。
 4. **「交叉對照表」動態省略與連貫編號規則**：
@@ -513,6 +513,16 @@ def render_recycling_guide() -> None:
         """,
         unsafe_allow_html=True,
     )
+    st.caption("📚 分類邏輯依據：參考 Ellen MacArthur Foundation《A New Textiles Economy》紡織循環經濟架構、紡織回收分選實務及台灣環境部資源循環署單一材質設計方向彙整。")
+
+
+@st.dialog("🎯 我們如何判定漂綠風險？（補充說明）", width="large")
+def open_scoring_guide_dialog() -> None:
+    """以可關閉的彈出視窗呈現評分標準與三大查核支柱，不清空或覆蓋目前報告"""
+    render_scoring_guide(compact=False)
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    if st.button("✖️ 關閉說明，繼續查看報告", type="primary", use_container_width=True):
+        st.rerun()
 
 
 def render_report_dashboard(record: dict) -> None:
@@ -526,8 +536,7 @@ def render_report_dashboard(record: dict) -> None:
     top_l, top_r = st.columns([3, 1.2])
     top_l.success(f"✅ 分析完成（總耗時 **{elapsed:.1f}** 秒）")
     if top_r.button("📖 查看評分說明", use_container_width=True):
-        st.session_state["current_report"] = None
-        st.rerun()
+        open_scoring_guide_dialog()
 
     render_kpi_cards(kpi)
     st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
