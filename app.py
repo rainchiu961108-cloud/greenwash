@@ -734,9 +734,8 @@ def run_ai_analysis(
 
     attempt_plan = (
         (MODELS_TO_TRY[0], pick_key(0), True, 60000),   # 第 1 順位：主力模型（節點 A｜串流）
-        (MODELS_TO_TRY[0], pick_key(1), True, 60000),   # 第 2 順位：主力模型（節點 B｜串流）
+        (MODELS_TO_TRY[1], pick_key(1), True, 60000),   # 第 2 順位：備援模型（節點 B｜串流，避開同模型尖峰塞車）
         (MODELS_TO_TRY[0], pick_key(2), False, 60000),  # 第 3 順位：主力模型（節點 C｜標準通道）
-        (MODELS_TO_TRY[1], pick_key(3), True, 60000),   # 第 4 順位：備援模型（串流）
     )
 
     timer_box = st.empty()
