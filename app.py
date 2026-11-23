@@ -17,7 +17,7 @@ import streamlit.components.v1 as components
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELS_TO_TRY = ("gemini-3.5-flash", "gemini-3.8-flash")
 THINKING_BUDGET = -1  # -1 表示自動思考模式（由模型依圖文複雜度動態決定）
-MAX_OUTPUT_TOKENS = 4096  # 預留自動思考與完整 5 大架構報告空間，避免截斷
+MAX_OUTPUT_TOKENS = 8192  # 預留自動思考與完整白話報告空間，避免最後一區被思考耗盡截斷
 KB_FOLDER = os.path.join(BASE_DIR, "kb_docs")
 KB_CHUNK_SIZE = 350
 KB_PER_FILE_LIMIT = 1800  # 3 份合計約 5,400 字，降低免費版伺服器輸入負載與拒絕機率
@@ -53,7 +53,7 @@ CORE_KEYWORDS = tuple(
     )
 )
 
-BASE_SYSTEM_PROMPT = """你是專業的「服飾消費品漂綠審查員」。請先在思考階段快速核對上傳圖片與文字中的「品牌宣傳資訊」與「實際成分水洗標資訊」，並嚴格對照下方附帶的【專屬審查知識庫精選規則】進行認證門檻、混紡回收分級與漂綠七宗罪判讀（思考請聚焦核心判斷，避免冗長推演）。
+BASE_SYSTEM_PROMPT = """你是專業的「服飾消費品漂綠審查員」。請先在思考階段快速核對上傳圖片與文字中的「品牌宣傳資訊」與「實際成分水洗標資訊」，並嚴格對照下方附帶的【專屬審查知識庫精選規則】進行認證門檻、混紡回收分級與漂綠七宗罪判讀（思考僅需精簡心算關鍵成分、認證與級別，切勿在思考過程重複撰寫草稿，將篇幅與時間完整保留給正式報告）。
 
 【核心任務：把專業知識翻成消費者看得懂的白話文】：
 1. **專有名詞與英文標籤必附白話解釋**：一般消費者看不懂化學名稱、紡織回收術語與認證縮寫。凡出現任何**印在標籤上的英文／驗證機構／認證專有名詞**（如 `Organic`、`Licence no`、`ETKO`、`Control Union`、`GOTS`、`OCS`、`GRS`、`OEKO-TEX`、`bluesign` 等）或**成分／化工術語**（如 `Spandex / Elastane`、`Polyester`、`機械開松`、`纖維素化學解聚`、`萊賽爾`、`閉環回收`、`降級回收`、`微塑膠`等），**第一次出現時必須用括號或簡短白話一句話說明「它是什麼意思、對消費者或環境有什麼影響」**；至於「非印在衣物上」的工業技術英文縮寫（例如 `NIR`、`Tier 1` 等），請直接寫純中文白話（如「近紅外線光學掃描分選機器」、「第一級」），不要輸出讓人誤會的英文代號！
@@ -537,6 +537,8 @@ def render_report_dashboard(record: dict) -> None:
     top_l.success(f"✅ 分析完成（總耗時 **{elapsed:.1f}** 秒）")
     if top_r.button("📖 查看評分說明", use_container_width=True):
         open_scoring_guide_dialog()
+    if record.get("truncated"):
+        st.warning("⚠️ 本次報告內容較長，末尾可能受限於單次輸出上限而略微截斷；建議可重新分析或精簡輸入文字。")
 
     render_kpi_cards(kpi)
     st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
@@ -738,8 +740,20 @@ def run_ai_analysis(
     render_live_timer(timer_box, "正在分析衣物成分與永續資訊", elapsed_offset=0.0)
 
     full_text = ""
+    is_truncated = False
     error_logs: list[str] = []
     last_was_auth_err = False
+
+    def _check_max_tokens(resp_obj) -> bool:
+        try:
+            cands = getattr(resp_obj, "candidates", None) or ()
+            for cand in cands:
+                fr = str(getattr(cand, "finish_reason", "") or "")
+                if "MAX_TOKENS" in fr:
+                    return True
+        except Exception:
+            pass
+        return False
 
     for attempt_idx, (model_name, k_idx, use_stream, timeout_ms) in enumerate(attempt_plan, start=1):
         if k_idx in invalid_keys:
@@ -750,6 +764,7 @@ def run_ai_analysis(
                 time.sleep(0.8)
 
         client = get_genai_client(api_keys[k_idx], timeout_ms)
+        attempt_truncated = False
         try:
             if use_stream:
                 chunks_buf: list[str] = []
@@ -757,6 +772,8 @@ def run_ai_analysis(
                 for chunk in client.models.generate_content_stream(
                     model=model_name, contents=user_contents, config=gen_config
                 ):
+                    if _check_max_tokens(chunk):
+                        attempt_truncated = True
                     if not chunk.text:
                         continue
                     now = time.time()
@@ -774,11 +791,13 @@ def run_ai_analysis(
                 resp = client.models.generate_content(
                     model=model_name, contents=user_contents, config=gen_config
                 )
+                attempt_truncated = _check_max_tokens(resp)
                 if resp and resp.text:
                     full_text = resp.text
 
             if not full_text:
                 raise RuntimeError("模型回傳空白內容")
+            is_truncated = attempt_truncated
             break
         except Exception as e:
             err_str = str(e)
@@ -791,6 +810,8 @@ def run_ai_analysis(
     total_elapsed = time.time() - start_time
     if full_text:
         clean_final = clean_report_text(full_text)
+        if clean_final.count("**") % 2 == 1 and clean_final.rstrip().endswith("**"):
+            clean_final = clean_final.rstrip()[:-2].rstrip()
         preview = clean_final[:150]
         dot = "🔴" if "🔴" in preview else ("🟡" if "🟡" in preview else ("🟢" if "🟢" in preview else "⚪"))
         snippet = claim_text.strip()[:14] + ("…" if len(claim_text.strip()) > 14 else "") if claim_text.strip() else "水洗標單獨體檢"
@@ -801,6 +822,7 @@ def run_ai_analysis(
             "report": clean_final,
             "elapsed": total_elapsed,
             "kb_text": retrieved_kb,
+            "truncated": is_truncated,
         }
 
     # 失敗時以同類型的靜態紅框取代碼表並凍結秒數，避免跨元件替換觸發 React removeChild 錯誤
