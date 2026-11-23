@@ -1,0 +1,29 @@
+# === 機敏資訊與 API 金鑰（絕對禁止上傳至 GitHub）===
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+*.key
+*.pem
+
+# === Python 快取與虛擬環境 ===
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# === Microsoft Word 編輯時產生的暫存鎖定檔 ===
+~$*.docx
+~$*
+
+# === 作業系統與雜項暫存檔 ===
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
+
+# === 選用：若未來改用 Git 記錄歷史版本，可取消下方註解以排除舊手動備份與 AI 技能快取 ===
+# backups/
+# .agents/
