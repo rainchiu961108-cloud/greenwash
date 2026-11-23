@@ -56,7 +56,7 @@ CORE_KEYWORDS = tuple(
 BASE_SYSTEM_PROMPT = """你是專業的「服飾消費品漂綠審查員」。請先在思考階段快速核對上傳圖片與文字中的「品牌宣傳資訊」與「實際成分水洗標資訊」，並嚴格對照下方附帶的【專屬審查知識庫精選規則】進行認證門檻、混紡回收分級與漂綠七宗罪判讀（思考僅需精簡心算關鍵成分、認證與級別，切勿在思考過程重複撰寫草稿，將篇幅與時間完整保留給正式報告）。
 
 【核心任務：把專業知識翻成消費者看得懂的白話文】：
-1. **專有名詞與英文標籤必附白話解釋**：一般消費者看不懂化學名稱、紡織回收術語與認證縮寫。凡出現任何**印在標籤上的英文／驗證機構／認證專有名詞**（如 `Organic`、`Licence no`、`ETKO`、`Control Union`、`GOTS`、`OCS`、`GRS`、`OEKO-TEX`、`bluesign` 等）或**成分／化工術語**（如 `Spandex / Elastane`、`Polyester`、`機械開松`、`纖維素化學解聚`、`萊賽爾`、`閉環回收`、`降級回收`、`微塑膠`等），**第一次出現時必須用括號或簡短白話一句話說明「它是什麼意思、對消費者或環境有什麼影響」**；至於「非印在衣物上」的工業技術英文縮寫（例如 `NIR`、`Tier 1` 等），請直接寫純中文白話（如「近紅外線光學掃描分選機器」、「第一級」），不要輸出讓人誤會的英文代號！
+1. **專有名詞與英文標籤必附白話解釋**：一般消費者看不懂化學名稱、紡織回收術語與認證縮寫。凡出現任何**印在標籤上的英文／驗證機構／認證專有名詞**（如 `Organic`、`Licence no`、`ETKO`、`Control Union`、`GOTS`、`OCS`、`GRS`、`OEKO-TEX`、`bluesign` 等）或**成分／化工術語**（如 `Spandex / Elastane`、`Polyester`、`機械開松`、`纖維素化學解聚`、`萊賽爾`、`閉環回收`、`降級回收`、`微塑膠`等），**第一次出現時必須用括號或簡短白話一句話說明「它是什麼意思、對消費者或環境有什麼影響」**；至於「非印在衣物上」的工業技術英文縮寫（例如 `NIR`、`Tier 1`、`Tier 2`、`Tier 3` 等），請直接寫純中文白話（如「近紅外線光學掃描分選機器」、「第一級」、「第二級」、「第三級」），不要輸出讓人誤會的英文代號！
    - 白話示範：「標籤載明等級『Organic』（代表有機天然纖維含量須達 95% 以上）、驗證機構『ETKO』（獨立第三方稽核單位，負責實地查核工廠，不是品牌自己說了算）、許可編號『Licence no 4184』（就像這件衣服可追溯查驗的有機身分證字號）」。
    - 白話示範：「不需靠昂貴的近紅外線光學掃描機器費力挑出混雜塑膠，只要切碎重新紡紗或溶解重抽就能變回新布料（即『衣到衣』閉環再生）」。
 2. **緊扣本次實物細節（拒絕套版）**：每項分析必須直接引用本次圖片與文字中辨識到的確切成分百分比、產地、洗滌符號、認證字號或宣傳原句進行客製化推理；不同衣物必須產出對應的專屬分析，嚴禁套用一成不變的通用文字。
@@ -66,6 +66,7 @@ BASE_SYSTEM_PROMPT = """你是專業的「服飾消費品漂綠審查員」。�
    - 若使用者有填寫宣傳文案、上傳多張圖進行對照，或圖片中明確包含品牌環保／永續宣稱，則完整輸出 `1～5` 五大章節。
 5. **格式與用詞鐵則**：
    - 每個主標題獨立一行（`### ` 開頭），標題下方空一行再寫內容；Markdown 表格前必須空一行，禁止使用 `<br>` 等 HTML 標籤（多項資訊用全形分號「；」隔開）。
+   - 使用粗體 `**` 強調引號內文字時，請將 `**` 寫在引號裡面（例如 `「**第一級**」`），不要寫成 `**「第一級」**`（避免瀏覽器顯示出多餘星號）。
    - 風險評級首行用詞必須嚴格統一為以下三者之一（一字不差）：
      - `🔴 高風險（高度漂綠疑慮）`
      - `🟡 中風險（資訊模糊或回收受限）`
@@ -268,6 +269,9 @@ def retrieve_relevant_kb_context(
 
 # --- 報告清洗、解析與視覺元件 ---
 _SEC_TITLE_LINE_RE = re.compile(r"(?m)^###\s*([1-5])[\.、\s]+(【[^\n]+)")
+_BOLD_PUNCT_WRAP_RE = re.compile(r"\*\*([「『（【《])([^\n*]+?)([」』）】》])\*\*")
+_BOLD_OPEN_PUNCT_RE = re.compile(r"([^\s「『（【《(\*])\*\*([「『（【《\(])")
+_BOLD_CLOSE_PUNCT_RE = re.compile(r"([」』）】》\)])\*\*([^\s」』）】》)。，、；：！？\.\,\;\:\!\?\*\)\n])")
 _SECTION_KEYWORDS = (
     (2, ("交叉對照", "宣傳 vs", "對照表")),
     (3, ("混紡回收", "回收難度")),
@@ -276,7 +280,8 @@ _SECTION_KEYWORDS = (
     (1, ("風險評級",)),
 )
 _NEG_OR_HYPO_CERT_TOKENS = (
-    "無", "未", "缺", "非", "沒有", "僅有", "自繪",
+    "無認證", "無第三方", "無任何", "無國際", "無有機", "未檢出", "未見",
+    "未標示", "未附", "未達", "缺乏", "缺少", "沒有", "僅有", "自繪", "自創", "非國際",
     "建議", "推薦", "替代", "若能", "改選", "優先選擇", "未來",
 )
 
@@ -296,9 +301,17 @@ def normalize_section_numbers(text: str) -> str:
     return _SEC_TITLE_LINE_RE.sub(_replace_header, text)
 
 
+def fix_markdown_bold_delimiters(text: str) -> str:
+    """修復 CommonMark 中因緊鄰全形引號／括號導致未渲染而露出的 `**` 星號"""
+    text = _BOLD_PUNCT_WRAP_RE.sub(r"\1**\2**\3", text)
+    text = _BOLD_OPEN_PUNCT_RE.sub(r"\1 **\2", text)
+    return _BOLD_CLOSE_PUNCT_RE.sub(r"\1** \2", text)
+
+
 def clean_report_text(text: str) -> str:
-    """清除模型可能誤輸出的 HTML 換行標籤並順編連貫章節序號"""
-    return normalize_section_numbers(_BR_TAG_RE.sub("；", text))
+    """清除 HTML 換行標籤、修復中文標點旁的粗體星號，並順編連貫章節序號"""
+    cleaned = fix_markdown_bold_delimiters(_BR_TAG_RE.sub("；", text))
+    return normalize_section_numbers(cleaned)
 
 
 def _match_section_num(header_line: str, fallback_num: int) -> int:
@@ -371,12 +384,7 @@ def extract_kpi_summary(report_text: str, sections: dict[int, str]) -> dict[str,
                 break
 
     if not cert_source:
-        sec1 = sections.get(1, "")
-        cert_lines = [
-            ln for ln in sec1.splitlines()
-            if any(k in ln for k in ("認證辨識", "實物與認證", "國際認證", "第三方認證"))
-        ]
-        cert_source = "\n".join(cert_lines) if cert_lines else sec1
+        cert_source = sections.get(1, "")
 
     found_certs = _extract_certs_from_text(cert_source)
     if found_certs:
@@ -527,7 +535,7 @@ def open_scoring_guide_dialog() -> None:
 
 def render_report_dashboard(record: dict) -> None:
     """以「頂部總覽卡 ＋ 分頁切換」渲染完成後的檢驗報告，並於各分頁底下顯示對應分級標準"""
-    report_text = record["report"]
+    report_text = fix_markdown_bold_delimiters(record["report"])
     elapsed = record["elapsed"]
     retrieved_kb = record.get("kb_text", "")
     sections = parse_report_sections(report_text)
