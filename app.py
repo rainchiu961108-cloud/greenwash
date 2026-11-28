@@ -1,8 +1,10 @@
 import html
 import io
 import os
+import queue
 import random
 import re
+import threading
 import time
 import xml.etree.ElementTree as ET
 import zipfile
@@ -28,6 +30,9 @@ IMG_TARGET_MAX_BYTES = 40 * 1024  # 單圖上限 40KB，超過自動二次輕量
 MAX_IMAGES = 6
 MAX_CLAIM_CHARS = 1500
 STREAM_UPDATE_INTERVAL = 0.12  # 串流畫面節流間隔（秒），減少瀏覽器頻繁重繪
+FIRST_TOKEN_TIMEOUT_SEC = 70.0  # 僅在「尚未出現任何可見文字」前計時（70 秒無首字才切換備援）
+STREAM_CHUNK_STALL_SEC = 45.0   # 開始跳字後取消總時限，僅防單次連線完全卡死超過 45 秒
+SDK_REQUEST_TIMEOUT_MS = 300000 # 底層連線放寬至 5 分鐘，確保跳字後可完整生成整份報告
 MAX_HISTORY_ITEMS = 5
 
 WORD_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
@@ -1259,6 +1264,85 @@ def render_live_timer(
         )
 
 
+def _iter_stream_with_first_token_timeout(
+    client: genai.Client,
+    model_name: str,
+    contents: list,
+    config: types.GenerateContentConfig,
+    first_token_timeout: float = FIRST_TOKEN_TIMEOUT_SEC,
+    chunk_stall_timeout: float = STREAM_CHUNK_STALL_SEC,
+):
+    """串流呼叫 Gemini：僅在尚未出現任何可見文字時套用首字逾時；一旦開始跳字即忽略總時限，讓報告完整生成"""
+    q: queue.Queue = queue.Queue()
+    stop_event = threading.Event()
+    stream_holder: dict = {"stream": None}
+
+    def _close_stream() -> None:
+        stream_obj = stream_holder.get("stream")
+        if stream_obj is not None and hasattr(stream_obj, "close"):
+            try:
+                stream_obj.close()
+            except Exception:
+                pass
+
+    def _worker() -> None:
+        try:
+            stream = client.models.generate_content_stream(
+                model=model_name, contents=contents, config=config
+            )
+            stream_holder["stream"] = stream
+            for chunk in stream:
+                if stop_event.is_set():
+                    break
+                q.put(("chunk", chunk))
+            if not stop_event.is_set():
+                q.put(("done", None))
+        except Exception as exc:
+            if not stop_event.is_set():
+                q.put(("err", exc))
+        finally:
+            _close_stream()
+
+    worker = threading.Thread(target=_worker, daemon=True)
+    worker.start()
+
+    got_first_text = False
+    start_ts = time.monotonic()
+    last_activity_ts = start_ts
+
+    while True:
+        now = time.monotonic()
+        if not got_first_text:
+            remaining = first_token_timeout - (now - start_ts)
+            if remaining <= 0:
+                stop_event.set()
+                _close_stream()
+                raise TimeoutError(f"等待首字輸出超過 {int(first_token_timeout)} 秒")
+            wait_sec = min(0.5, remaining)
+        else:
+            remaining_stall = chunk_stall_timeout - (now - last_activity_ts)
+            if remaining_stall <= 0:
+                stop_event.set()
+                _close_stream()
+                raise TimeoutError(f"串流輸出中斷超過 {int(chunk_stall_timeout)} 秒")
+            wait_sec = min(0.5, remaining_stall)
+
+        try:
+            kind, payload = q.get(timeout=wait_sec)
+        except queue.Empty:
+            continue
+
+        if kind == "done":
+            break
+        if kind == "err":
+            raise payload
+
+        last_activity_ts = time.monotonic()
+        if getattr(payload, "text", None):
+            got_first_text = True
+        yield payload
+
+
 def run_ai_analysis(
     api_keys: tuple[str, ...],
     invalid_keys: set[int],
@@ -1324,9 +1408,9 @@ def run_ai_analysis(
     pick_key = lambda n: valid_indices[n % len(valid_indices)]
 
     attempt_plan = (
-        (MODELS_TO_TRY[0], pick_key(0), True, 60000),   # 第 1 順位：主力模型（節點 A｜串流）
-        (MODELS_TO_TRY[1], pick_key(1), True, 60000),   # 第 2 順位：備援模型（節點 B｜串流，避開同模型尖峰塞車）
-        (MODELS_TO_TRY[0], pick_key(2), False, 60000),  # 第 3 順位：主力模型（節點 C｜標準通道）
+        (MODELS_TO_TRY[0], pick_key(0), True, SDK_REQUEST_TIMEOUT_MS),  # 第 1 順位：主力模型（節點 A｜串流）
+        (MODELS_TO_TRY[1], pick_key(1), True, SDK_REQUEST_TIMEOUT_MS),  # 第 2 順位：備援模型（節點 B｜串流，避開同模型尖峰塞車）
+        (MODELS_TO_TRY[0], pick_key(2), True, SDK_REQUEST_TIMEOUT_MS),  # 第 3 順位：主力模型（節點 C｜串流備援）
     )
 
     timer_box = st.empty()
@@ -1367,13 +1451,17 @@ def run_ai_analysis(
             if use_stream:
                 chunks_buf: list[str] = []
                 last_render = 0.0
-                for chunk in client.models.generate_content_stream(
-                    model=model_name, contents=user_contents, config=gen_config
+                cleared_retry_hint = False
+                for chunk in _iter_stream_with_first_token_timeout(
+                    client, model_name, user_contents, gen_config
                 ):
                     if _check_max_tokens(chunk):
                         attempt_truncated = True
                     if not chunk.text:
                         continue
+                    if not cleared_retry_hint:
+                        retry_box.empty()
+                        cleared_retry_hint = True
                     now = time.time()
                     chunks_buf.append(chunk.text)
                     # 節流重繪，大幅降低 WebSocket 與瀏覽器排版負荷
