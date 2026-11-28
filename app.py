@@ -399,9 +399,10 @@ def retrieve_relevant_kb_context(
 
 # --- 報告清洗、解析與視覺元件 ---
 _SEC_TITLE_LINE_RE = re.compile(r"(?m)^###\s*([1-5])[\.、\s]+(【[^\n]+)")
-_BOLD_PUNCT_WRAP_RE = re.compile(r"\*\*([「『（【《])([^\n*]+?)([」』）】》])\*\*")
-_BOLD_OPEN_PUNCT_RE = re.compile(r"([^\s「『（【《(\*])\*\*([「『（【《\(])")
-_BOLD_CLOSE_PUNCT_RE = re.compile(r"([」』）】》\)])\*\*([^\s」』）】》)。，、；：！？\.\,\;\:\!\?\*\)\n])")
+_QUOTE_PAIRS = {"「": "」", "『": "』", "（": "）", "【": "】", "《": "》"}
+_OPEN_PUNCT_CHARS = "「『（【《("
+_CLOSE_PUNCT_CHARS = "」』）】》)"
+_TRAILING_SAFE_CHARS = " \t\n」』）】》)。，、；：！？.,;:!?*)"
 _SECTION_KEYWORDS = (
     (2, ("交叉對照", "宣傳 vs", "對照表")),
     (3, ("混紡回收", "回收難度")),
@@ -431,27 +432,37 @@ def normalize_section_numbers(text: str) -> str:
     return _SEC_TITLE_LINE_RE.sub(_replace_header, text)
 
 
-def _trim_bold_inner_spaces(text: str) -> str:
-    """清除 `**文字 **` 等成對粗體標記內側多餘空白，避免 CommonMark 無法渲染而露出星號"""
+def fix_markdown_bold_delimiters(text: str) -> str:
+    """以成對粗體邊界解析修復 CommonMark 星號露出問題（清除內側多餘空白、外移成對引號、補正中英文標點間距）"""
     out_lines = []
     for line in text.split("\n"):
-        if "**" in line:
-            parts = line.split("**")
-            for idx in range(1, len(parts) - 1, 2):
-                trimmed = parts[idx].strip(" \t")
-                if trimmed:
-                    parts[idx] = trimmed
-            line = "**".join(parts)
-        out_lines.append(line)
+        if "**" not in line:
+            out_lines.append(line)
+            continue
+        parts = line.split("**")
+        for idx in range(1, len(parts) - 1, 2):
+            content = parts[idx].strip(" \t")
+            if not content:
+                continue
+            if (
+                len(content) >= 3
+                and content[0] in _QUOTE_PAIRS
+                and content[-1] == _QUOTE_PAIRS[content[0]]
+                and _QUOTE_PAIRS[content[0]] not in content[1:-1]
+            ):
+                parts[idx - 1] += content[0]
+                parts[idx + 1] = content[-1] + parts[idx + 1]
+                content = content[1:-1].strip(" \t")
+            parts[idx] = content
+            if content and content[0] in _OPEN_PUNCT_CHARS and parts[idx - 1]:
+                prev_ch = parts[idx - 1][-1]
+                if not prev_ch.isspace() and prev_ch not in _OPEN_PUNCT_CHARS:
+                    parts[idx - 1] += " "
+            if content and content[-1] in _CLOSE_PUNCT_CHARS and parts[idx + 1]:
+                if parts[idx + 1][0] not in _TRAILING_SAFE_CHARS:
+                    parts[idx + 1] = " " + parts[idx + 1]
+        out_lines.append("**".join(parts))
     return "\n".join(out_lines)
-
-
-def fix_markdown_bold_delimiters(text: str) -> str:
-    """修復 CommonMark 中因內側多餘空白或緊鄰全形引號／括號導致未渲染而露出的 `**` 星號"""
-    text = _trim_bold_inner_spaces(text)
-    text = _BOLD_PUNCT_WRAP_RE.sub(r"\1**\2**\3", text)
-    text = _BOLD_OPEN_PUNCT_RE.sub(r"\1 **\2", text)
-    return _BOLD_CLOSE_PUNCT_RE.sub(r"\1** \2", text)
 
 
 def strip_sustain_meta(text: str, strip_partial: bool = False) -> str:
