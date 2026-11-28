@@ -37,6 +37,12 @@ _ZH_TERM_RE = re.compile(r"[\u4e00-\u9fff]{2,4}")
 _SEC_HEADER_RE = re.compile(r"(?m)^###\s*([1-5])[\.、\s]")
 _TIER_EXPLICIT_RE = re.compile(r"(?:屬於|判定為?|列為|歸類為?|屬)[^。\n]{0,14}(第[一二三]級)")
 _TIER_ANY_RE = re.compile(r"(第[一二三]級)")
+_SUSTAIN_META_SPLIT_RE = re.compile(r"\n?===+\s*SUSTAIN_DATA[\s\S]*$", re.IGNORECASE)
+_SUSTAIN_META_PARTIAL_RE = re.compile(r"\n?={2,}[^\n]*$")
+_SUSTAIN_META_BLOCK_RE = re.compile(
+    r"===+\s*SUSTAIN_DATA\s*===+\s*([\s\S]*?)(?:===+\s*END_SUSTAIN_DATA\s*===+|$)",
+    re.IGNORECASE,
+)
 
 KNOWN_CERTS = (
     "GOTS", "OCS", "GRS", "RCS", "OEKO-TEX", "bluesign",
@@ -73,31 +79,50 @@ BASE_SYSTEM_PROMPT = """你是專業的「服飾消費品漂綠審查員」。�
      - `🟢 低風險（具公信力認證或純質易回收）`
    - 若輸出交叉對照表，表格標題固定為：`| 品牌宣傳宣稱 | 水洗標實際成分與產地 | 辨識到的第三方認證標章 |`。
 
+6. **網購無水洗標情境與日常無標章公平判讀**：
+   - **網購下單前（無實體水洗標）**：若使用者僅提供賣場文字規格或商品頁截圖、沒有水洗標照片，**不要拒絕分析**，請直接依據已提供的纖維資訊評估回收度與風險，同時明確指出商家未揭露的資訊缺口（例如缺少確切百分比、未說明是否含彈性纖維、未標示產地）。
+   - **日常無認證服飾公平判讀**：市面上大多數日常衣物並沒有花費高昂成本申請第三方國際認證（如 `GOTS`、`GRS`、`OEKO-TEX`），因此「沒有認證標章」**不等於漂綠**！認證屬於信任「加分項」，只要沒有誇大環保宣稱、資訊揭露誠實，或是屬於 100% 單一純質易回收材質，皆應在報告中給予公正肯定，並著重在後續洗護與延壽建議。
+
 請用繁體中文依以下架構輸出報告：
 
 ### 1. 【風險評級】
 第一行僅輸出標準風險標籤（`🔴 高風險（高度漂綠疑慮）`、`🟡 中風險（資訊模糊或回收受限）` 或 `🟢 低風險（具公信力認證或純質易回收）`）。
 空一行後依序詳細說明判定原因（遇任何英文等級、驗證機構或專業縮寫皆須用白話解釋意思）：
-- **本次實物與認證辨識**：用白話清楚列出辨識到的纖維成分與比例、產地標示，以及實際檢出的第三方認證標章（若有出現等級名稱、驗證機構代碼或許可字號，請一併翻譯成白話意義；若無則標示「無第三方國際認證」）。
-- **三大依據判定理由**：分別針對「① 宣傳與材質一致性」、「② 國際認證門檻」、「③ 混紡回收分級」逐一說明本件衣服觸發此風險等級的具體原因與知識庫判讀依據。
+- **本次實物與認證辨識**：用白話清楚列出辨識到的纖維成分與比例、產地標示（若賣場或圖片未標示請明確寫出「未揭露」），以及實際檢出的第三方認證標章（若有出現等級名稱、驗證機構代碼或許可字號，請一併翻譯成白話意義；若無則標示「未見第三方國際認證（日常服飾常見，屬信任加分項）」）。
+- **三大依據判定理由**：分別針對「① 宣傳與材質一致性（含資訊透明度）」、「② 國際認證加分門檻」、「③ 混紡回收分級」逐一說明本件衣服觸發此風險等級的具體原因與知識庫判讀依據。
 
 ### 2. 【宣傳 vs. 實際成分交叉對照表】
-（僅在提供品牌宣傳文案／宣傳圖，或照片內含環保宣傳標語時輸出；單純單張水洗標體檢請直接省略本區塊，並將後方章節直接順編為 2、3、4）
+（僅在提供品牌宣傳文案／宣傳圖／網購賣場規格，或照片內含環保宣傳標語時輸出；單純單張水洗標體檢請直接省略本區塊，並將後方章節直接順編為 2、3、4）
 （空一行後輸出標準 Markdown 表格）
-- **對照落差與合規性解析**：逐句拆解品牌宣傳用語與實際水洗標成分、認證之間的落差或吻合處，用白話說明為何構成或未構成誤導。
+- **對照落差與合規性解析**：逐句拆解品牌宣傳用語與實際成分、資訊揭露完整度、認證之間的落差或吻合處，用白話說明為何構成或未構成誤導。
 
 ### 3. 【混紡回收難度拆解】（若省略對照表，此區請編號為 `### 2.`）
-- **回收分級判定與白話機制解析**：依知識庫明確判定本件屬於「第一級（100% 單一純質閉環回收）」、「第二級（同屬性混紡降級回收）」或「第三級（異質混紡或含彈性纖維回收死角）」，並針對本次確切纖維組合與比例，用消費者聽得懂的白話說明回收廠實際上為什麼容易或很難把這些纖維分開再利用（若提及光學分選、化學溶解或再生纖維等術語，務必用白話解釋）。
+- **回收分級判定與白話機制解析**：依知識庫明確判定本件屬於「第一級（100% 單一純質閉環回收）」、「第二級（同屬性混紡降級回收）」或「第三級（異質混紡或含彈性纖維回收死角）」（若網購規格未寫清比例，請說明可能的分級範圍與關鍵變數），並針對本次確切纖維組合與比例，用消費者聽得懂的白話說明回收廠實際上為什麼容易或很難把這些纖維分開再利用（若提及光學分選、化學溶解或再生纖維等術語，務必用白話解釋）。
 - **附屬裝飾配件與實務回收影響**：檢視「不含附屬品及裝飾配件」標示及本件可能涉及的車縫線、織標、鈕扣、拉鍊、印花塗層或鬆緊帶對再生純度的影響，並說明汰換時應如何處理。
 
 ### 4. 【漂綠七宗罪與環境足跡查核】（若省略對照表，此區請編號為 `### 3.`）
-- **漂綠行為逐條拆解／透明度檢視**：若有品牌宣傳，依知識庫逐一核對命中了「漂綠七宗罪」中哪幾宗罪並引用原句說明原因；若無宣傳，則檢視其成分／供應鏈揭露是否完整，以及無認證情況下的消費者盲區。
+- **漂綠行為逐條拆解／資訊透明度檢視**：若有品牌宣傳，依知識庫逐一核對命中了「漂綠七宗罪」中哪幾宗罪並引用原句說明原因；若無誇大宣傳，則肯定其誠實度並檢視成分比例／產地／供應鏈揭露是否完整，指出消費者的判斷盲區。
 - **材質製程與生命週期環境足跡**：緊扣本次辨識出的具體材質與產地，用白話深入剖析原料端的耗水、農藥或石化足跡、缺乏 OEKO-TEX Standard 100（無毒安全把關）或 bluesign（環保製程認證）的印染化學殘留風險、洗滌微塑膠釋放疑慮，以及產地標示反映的運輸碳足跡意義。
-- **水洗標細節與印刷準確度**：實質檢核照片中的纖維比例加總是否為 100%、洗滌符號與文字說明是否一致，以及中英文印刷是否有漏字、拼寫錯誤或矛盾。
+- **水洗標或規格細節檢核**：實質檢核照片或賣場規格中的纖維比例加總是否為 100%、洗滌符號與文字說明是否一致，以及中英文印刷是否有漏字、拼寫錯誤、自相矛盾或關鍵資訊空白。
 
 ### 5. 【永續替代與洗護建議】（若省略對照表，此區請編號為 `### 4.`）
-- **針對本件材質的專屬洗護處方**：依本件實際洗標圖示與纖維特性，提出具體的建議水溫、洗劑選擇（用白話說明為何應避開柔軟精或含氯漂白劑）、脫水轉速、晾曬方式與微塑膠攔截措施（如濾網洗衣袋），並說明為什麼這些步驟能有效延長該材質的使用壽命。
-- **針對本件缺口的替代選購與汰換指引**：依據本件欠缺的永續環節，明確推薦應優先選擇的認證標章（簡要白話說明該標章代表什麼把關）或替代材質方向；同時提供這件衣服未來汰換時最合適的循環去處（如二手轉讓、舊衣回收或避免誤投閉環再生箱）。"""
+- **針對本件材質的專屬洗護延壽處方**：依本件實際洗標圖示與纖維特性，提出具體的建議水溫、洗劑選擇（用白話說明為何應避開柔軟精或含氯漂白劑）、脫水轉速、晾曬方式與微塑膠攔截措施（如濾網洗衣袋），並說明為什麼延長穿著壽命是最有感的永續行動。
+- **替代選購與台灣在地循環去處指引**：依據本件欠缺的永續環節，明確推薦應優先選擇的認證標章（簡要白話說明該標章代表什麼把關）或單一純質替代材質；同時提供這件衣服未來汰換時在台灣最適合的循環去處（如八成新以上優先二手轉售／換衣市集／社福捐贈；破損的第一級純棉可剪裁為抹布或送單一材質回收；破損的第二、三級混紡或含彈性纖維切勿誤投只收堪穿二手衣的街頭舊衣回收箱）。
+
+【報告最末尾必附結構化摘要區塊】（請務必接在整份報告最後一行之後，勿寫在報告正文內）：
+請嚴格使用以下格式輸出 9 行欄位，供系統繪製永續儀表板與賣家提問範本：
+===SUSTAIN_DATA===
+透明度: 高|中|低 | 18字內白話說明
+循環力: 高|中|低 | 18字內白話說明
+誠實度: 高|中|低 | 18字內白話說明
+認證背書: 有|無 | 實際檢出標章，或填「日常多無標章（屬加分項）」
+耗水量: 高|中|低 | 14字內白話說明
+微塑膠: 高|中|低 | 14字內白話說明
+分解性: 易|中|難 | 14字內白話說明
+回收度: 易|中|難 | 14字內白話說明
+賣家提問: （資訊完整填「無」；若有缺漏成分比例／產地／彈性纖維／認證，寫一段 40～90 字禮貌自然的繁中私訊賣家提問句）
+===END_SUSTAIN_DATA===
+"""
 
 st.set_page_config(page_title="服飾永續與漂綠檢驗助手", page_icon="🌿", layout="wide")
 
@@ -308,9 +333,18 @@ def fix_markdown_bold_delimiters(text: str) -> str:
     return _BOLD_CLOSE_PUNCT_RE.sub(r"\1** \2", text)
 
 
-def clean_report_text(text: str) -> str:
-    """清除 HTML 換行標籤、修復中文標點旁的粗體星號，並順編連貫章節序號"""
-    cleaned = fix_markdown_bold_delimiters(_BR_TAG_RE.sub("；", text))
+def strip_sustain_meta(text: str, strip_partial: bool = False) -> str:
+    """移除報告末尾供系統解析的結構化永續摘要區塊，避免顯示於正文或匯出檔"""
+    cleaned = _SUSTAIN_META_SPLIT_RE.sub("", text)
+    if strip_partial:
+        cleaned = _SUSTAIN_META_PARTIAL_RE.sub("", cleaned)
+    return cleaned.rstrip()
+
+
+def clean_report_text(text: str, strip_partial: bool = False) -> str:
+    """移除系統摘要區塊、清除 HTML 換行標籤、修復中文標點旁的粗體星號，並順編連貫章節序號"""
+    body = strip_sustain_meta(text, strip_partial=strip_partial)
+    cleaned = fix_markdown_bold_delimiters(_BR_TAG_RE.sub("；", body))
     return normalize_section_numbers(cleaned)
 
 
@@ -388,11 +422,116 @@ def extract_kpi_summary(report_text: str, sections: dict[int, str]) -> dict[str,
 
     found_certs = _extract_certs_from_text(cert_source)
     if found_certs:
-        certs = ("✅ " + " / ".join(found_certs[:3]), "於水洗標或吊牌檢出國際第三方認證", "risk-low")
+        certs = ("✅ " + " / ".join(found_certs[:3]), "具國際第三方信任背書（永續加分項）", "risk-low")
     else:
-        certs = ("🏷️ 未檢出認證", "未見 GOTS、GRS、OEKO-TEX 等國際標章", "risk-mid")
+        certs = ("🏷️ 無國際標章", "日常服飾多無認證（屬加分項），請看下方 4 大永續維度", "risk-neutral")
 
     return {"risk": risk, "recycling": recycling, "certs": certs}
+
+
+def _norm_level(val: str, valid: tuple[str, ...], default: str) -> str:
+    for opt in valid:
+        if opt in val:
+            return opt
+    return default
+
+
+def parse_sustain_data(
+    raw_text: str,
+    report_text: str,
+    sections: dict[int, str],
+    kpi: dict[str, tuple[str, str, str]],
+    is_online_mode: bool = False,
+) -> dict:
+    """從 AI 末尾摘要區塊解析 4 大永續維度、4 項材質環境指標與賣家提問，缺漏時自動補齊安全預設值"""
+    fields: dict[str, str] = {}
+    m = _SUSTAIN_META_BLOCK_RE.search(raw_text or "")
+    if m:
+        for line in m.group(1).splitlines():
+            if ":" in line or "：" in line:
+                key, val = re.split(r"[:：]", line, maxsplit=1)
+                fields[key.strip()] = val.strip()
+
+    def _split_pair(key: str, valid: tuple[str, ...], default_lvl: str, default_desc: str) -> dict[str, str]:
+        raw_val = fields.get(key, "")
+        if "|" in raw_val:
+            lvl_part, desc_part = raw_val.split("|", 1)
+            return {
+                "level": _norm_level(lvl_part.strip(), valid, default_lvl),
+                "desc": desc_part.strip() or default_desc,
+            }
+        if raw_val:
+            return {"level": _norm_level(raw_val, valid, default_lvl), "desc": default_desc}
+        return {"level": default_lvl, "desc": default_desc}
+
+    # 依報告既有線索準備穩健的預設值
+    text_lower = (report_text or "").lower()
+    risk_title = kpi["risk"][0]
+    rec_title = kpi["recycling"][0]
+    has_cert = kpi["certs"][0].startswith("✅")
+
+    def_rec_lvl = "高" if "第一級" in rec_title else ("中" if "第二級" in rec_title else "低")
+    def_rec_desc = (
+        "單一純質具衣到衣閉環潛力" if def_rec_lvl == "高"
+        else ("同屬性混紡多屬降級回收" if def_rec_lvl == "中" else "異質混紡或彈性纖維難拆解")
+    )
+    def_honest_lvl = "低" if "🔴" in risk_title else ("中" if "🟡" in risk_title else "高")
+    def_honest_desc = (
+        "宣傳與實物落差較明顯" if def_honest_lvl == "低"
+        else ("部分用語偏模糊或缺佐證" if def_honest_lvl == "中" else "無誇大宣稱且標示相符")
+    )
+    def_trans_lvl = "低" if ("未揭露" in report_text or "未標示" in report_text) and is_online_mode else ("中" if is_online_mode else "高")
+    def_trans_desc = (
+        "關鍵比例或產地未寫清楚" if def_trans_lvl == "低"
+        else ("建議向賣家補齊細節資訊" if def_trans_lvl == "中" else "成分與基本標示尚屬明確")
+    )
+
+    has_synth = any(w in text_lower for w in ("聚酯", "polyester", "尼龍", "nylon", "壓克力", "亞克力", "彈性纖維", "spandex", "elastane", "人造纖維", "化纖"))
+    has_cotton = any(w in text_lower for w in ("純棉", "棉", "cotton"))
+    def_water = ("高", "傳統棉花種植耗水量較高") if has_cotton else (("低", "化纖製程耗水較天然棉低") if has_synth else ("中", "視原料與染整製程而定"))
+    def_micro = ("高", "洗滌易釋放合成微塑膠纖維") if has_synth else (("低", "天然植物纖維無塑膠微粒") if has_cotton else ("中", "需視混紡化纖比例而定"))
+    def_bio = ("難", "合成塑膠纖維極難自然分解") if has_synth else (("易", "天然純質纖維較容易分解") if has_cotton else ("中", "混紡或塗層會拖慢分解"))
+    def_rec_env = ("易" if def_rec_lvl == "高" else ("中" if def_rec_lvl == "中" else "難"), def_rec_desc[:14])
+
+    transparency = _split_pair("透明度", ("高", "中", "低"), def_trans_lvl, def_trans_desc)
+    circularity = _split_pair("循環力", ("高", "中", "低"), def_rec_lvl, def_rec_desc)
+    honesty = _split_pair("誠實度", ("高", "中", "低"), def_honest_lvl, def_honest_desc)
+    cert_bonus = _split_pair(
+        "認證背書",
+        ("有", "無"),
+        "有" if has_cert else "無",
+        kpi["certs"][0].replace("✅ ", "") if has_cert else "日常多無標章（屬加分項）",
+    )
+
+    water = _split_pair("耗水量", ("高", "中", "低"), *def_water)
+    microplastic = _split_pair("微塑膠", ("高", "中", "低"), *def_micro)
+    biodeg = _split_pair("分解性", ("易", "中", "難"), *def_bio)
+    recyclability = _split_pair("回收度", ("易", "中", "難"), *def_rec_env)
+
+    seller_q = fields.get("賣家提問", "").strip()
+    if seller_q in ("無", "無須", "不需要", "完整", "無需提問", "N/A", "-"):
+        seller_q = ""
+    elif not seller_q and (is_online_mode or transparency["level"] != "高"):
+        seller_q = (
+            "您好，想向您確認這件商品的完整材質與產地資訊：請問確切的纖維成分百分比是多少？"
+            "是否有含彈性纖維（如 Spandex／Lycra）？另外請問產地以及是否具備相關環保或無毒認證呢？謝謝您！"
+        )
+
+    return {
+        "dims": {
+            "transparency": transparency,
+            "circularity": circularity,
+            "honesty": honesty,
+            "cert_bonus": cert_bonus,
+        },
+        "env": {
+            "water": water,
+            "microplastic": microplastic,
+            "biodeg": biodeg,
+            "recyclability": recyclability,
+        },
+        "seller_question": seller_q,
+    }
 
 
 def render_kpi_cards(kpi: dict[str, tuple[str, str, str]]) -> None:
@@ -400,7 +539,7 @@ def render_kpi_cards(kpi: dict[str, tuple[str, str, str]]) -> None:
     cards = [
         ("漂綠風險評級", *kpi["risk"]),
         ("混紡回收分級", *kpi["recycling"]),
-        ("國際認證標章", *kpi["certs"]),
+        ("國際認證標章（加分項）", *kpi["certs"]),
     ]
     cols = st.columns(3)
     for col, (label, value, desc, style_cls) in zip(cols, cards):
@@ -416,6 +555,174 @@ def render_kpi_cards(kpi: dict[str, tuple[str, str, str]]) -> None:
         )
 
 
+def render_sustain_dimensions(sdata: dict) -> None:
+    """渲染 4 大永續體檢維度橫向列，平衡日常無認證服飾之評價"""
+    dims = sdata["dims"]
+    level_cls_3 = {"高": "lvl-good", "中": "lvl-mid", "低": "lvl-bad"}
+    items = [
+        ("🔍 資訊透明度", dims["transparency"]["level"], dims["transparency"]["desc"], level_cls_3.get(dims["transparency"]["level"], "lvl-mid")),
+        ("♻️ 材質循環力", dims["circularity"]["level"], dims["circularity"]["desc"], level_cls_3.get(dims["circularity"]["level"], "lvl-mid")),
+        ("🛡️ 誠實無漂綠", dims["honesty"]["level"], dims["honesty"]["desc"], level_cls_3.get(dims["honesty"]["level"], "lvl-mid")),
+        (
+            "🏅 認證加分項",
+            "已獲背書" if dims["cert_bonus"]["level"] == "有" else "無標章・加分項",
+            dims["cert_bonus"]["desc"],
+            "lvl-good" if dims["cert_bonus"]["level"] == "有" else "lvl-neutral",
+        ),
+    ]
+    st.markdown("<div class='section-mini-title'>🌱 4 大永續體檢維度</div>", unsafe_allow_html=True)
+    cols = st.columns(4)
+    for col, (title, badge, desc, cls) in zip(cols, items):
+        col.markdown(
+            f"""
+            <div class="dim-card">
+                <div class="dim-head">
+                    <span class="dim-title">{html.escape(title)}</span>
+                    <span class="dim-badge {cls}">{html.escape(badge)}</span>
+                </div>
+                <div class="dim-desc">{html.escape(desc)}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+def render_seller_question_box(sdata: dict, is_online_mode: bool) -> None:
+    """顯示一鍵複製私訊賣家提問範本，協助網購缺少水洗標時推動資訊透明"""
+    q_text = sdata.get("seller_question", "")
+    if q_text:
+        st.markdown(
+            """
+            <div class="seller-box">
+                <div class="seller-box-title">💬 商家標示不夠清楚？一鍵複製私訊賣家提問範本</div>
+                <div class="seller-box-sub">點選下方區塊右上角的複製圖示，貼到賣場聊聊或客服詢問，用消費提問促進資訊透明：</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.code(q_text, language=None)
+    elif is_online_mode:
+        st.caption("✅ 本次提供的商品材質與資訊揭露已算完整，暫無須額外向賣家追問。")
+
+
+def render_env_impact_bars(sdata: dict) -> None:
+    """於漂綠與足跡分頁頂部顯示 4 項材質環境指標視覺進度條"""
+    env = sdata["env"]
+    # 耗水量與微塑膠：越低越友善(綠)；分解性與回收度：越易越友善(綠)
+    specs = [
+        ("💧 耗水程度", env["water"], {"低": ("lvl-good", 30), "中": ("lvl-mid", 65), "高": ("lvl-bad", 100)}),
+        ("🫧 微塑膠風險", env["microplastic"], {"低": ("lvl-good", 30), "中": ("lvl-mid", 65), "高": ("lvl-bad", 100)}),
+        ("🍂 自然分解性", env["biodeg"], {"易": ("lvl-good", 95), "中": ("lvl-mid", 60), "難": ("lvl-bad", 28)}),
+        ("♻️ 循環回收度", env["recyclability"], {"易": ("lvl-good", 95), "中": ("lvl-mid", 60), "難": ("lvl-bad", 28)}),
+    ]
+    st.markdown("<div class='section-mini-title'>🌍 材質環境足跡速覽</div>", unsafe_allow_html=True)
+    cols = st.columns(4)
+    for col, (title, item, style_map) in zip(cols, specs):
+        lvl = item["level"]
+        cls, pct = style_map.get(lvl, ("lvl-mid", 60))
+        col.markdown(
+            f"""
+            <div class="env-card">
+                <div class="dim-head">
+                    <span class="env-title">{html.escape(title)}</span>
+                    <span class="dim-badge {cls}">{html.escape(lvl)}</span>
+                </div>
+                <div class="env-bar-bg"><div class="env-bar-fill {cls}" style="width:{pct}%"></div></div>
+                <div class="dim-desc">{html.escape(item["desc"])}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+
+def render_wear_longevity_calculator(record_id: int) -> None:
+    """呈現單次穿著成本（CPW）與延長穿著壽命永續計算器"""
+    with st.container(border=True):
+        st.markdown("#### ⏳ 穿久更永續：單次穿著成本（CPW）計算器")
+        c1, c2 = st.columns(2)
+        price = c1.number_input(
+            "預計入手價格（NT$）",
+            min_value=50,
+            max_value=50000,
+            value=690,
+            step=50,
+            key=f"cpw_price_{record_id}",
+        )
+        wears = c2.slider(
+            "預計會穿幾次？",
+            min_value=1,
+            max_value=120,
+            value=30,
+            key=f"cpw_wears_{record_id}",
+        )
+        cpw = price / wears
+        if wears < 10:
+            tier_msg = "⚠️ 低於 10 次較容易淪為衝動快時尚，建議多想一下搭配度再決定。"
+            tier_cls = "risk-high"
+        elif wears < 30:
+            tier_msg = "🟡 距離國際永續倡議「#30Wears（至少穿 30 次）」還差一點，再多穿幾次就回本了！"
+            tier_cls = "risk-mid"
+        elif wears < 60:
+            tier_msg = "🟢 已達成「#30Wears」永續門檻！每多穿一次都在攤薄這件衣服的環境足跡。"
+            tier_cls = "risk-low"
+        else:
+            tier_msg = "🌿 超高實穿率！把衣服穿到淋漓盡致，就是對地球最實際、最省錢的減碳行動。"
+            tier_cls = "risk-low"
+
+        st.markdown(
+            f"""
+            <div class="cpw-result {tier_cls}">
+                <div class="cpw-main">單次穿著成本：<strong>NT$ {cpw:,.1f} / 次</strong>（共穿 {wears} 次）</div>
+                <div class="cpw-sub">{html.escape(tier_msg)}</div>
+                <div class="cpw-tip">💡 英國永續服飾研究（WRAP）指出，將衣物穿著壽命延長約 9 個月，即可減少約 20%～30% 的碳、水與廢棄物足跡；冷水洗與自然陰乾是最有效的延壽習慣。</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+def render_taiwan_disposal_guide(kpi: dict[str, tuple[str, str, str]]) -> None:
+    """依本件混紡回收分級，呈現台灣在地舊衣淘汰與循環去處指引"""
+    rec_val = kpi["recycling"][0]
+    is_tier1 = "第一級" in rec_val
+    is_tier23 = "第二級" in rec_val or "第三級" in rec_val
+
+    with st.expander("🇹🇼 台灣在地淘汰與舊衣循環去處指引", expanded=True):
+        c1, c2, c3 = st.columns(3)
+        c1.markdown(
+            """
+            <div class="disposal-card">
+                <div class="disposal-title">👕 八成新・品相良好</div>
+                <div class="disposal-text">優先<strong>二手轉賣</strong>（旋轉拍賣、蝦皮二手）、參與換衣市集、親友轉贈，或捐贈給實際有需求之社福單位，讓衣物繼續被穿最環保。</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        t1_cls = "disposal-card disposal-highlight" if is_tier1 else "disposal-card"
+        t1_tag = " <span class='tag-best'>⭐ 本件破損適用</span>" if is_tier1 else ""
+        c2.markdown(
+            f"""
+            <div class="{t1_cls}">
+                <div class="disposal-title">♻️ 破損・第一級純棉/純天然{t1_tag}</div>
+                <div class="disposal-text">100% 純棉破損後非常吸水，適合<strong>剪裁成居家抹布</strong>或收納布袋；亦適合交由支援單一材質再生的紡織回收專案。</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        t23_cls = "disposal-card disposal-highlight" if is_tier23 else "disposal-card"
+        t23_tag = " <span class='tag-best'>⭐ 本件破損適用</span>" if is_tier23 else ""
+        c3.markdown(
+            f"""
+            <div class="{t23_cls}">
+                <div class="disposal-title">🚫 破損・第二／三級混紡{t23_tag}</div>
+                <div class="disposal-text"><strong>切勿投入街頭舊衣回收箱</strong>（多數僅收堪穿衣物，混紡破損會造成後端分選與清運負擔）；建議先作一次性擦拭後再依一般垃圾處理。</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
 def render_scoring_guide(compact: bool = False) -> None:
     """呈現清楚、合乎邏輯且精煉的「風險評級標準與三大判讀依據」"""
     if not compact:
@@ -423,8 +730,8 @@ def render_scoring_guide(compact: bool = False) -> None:
             """
             <div class="guide-hero">
                 <div class="guide-kicker">SCORING FRAMEWORK</div>
-                <h3>🎯 我們如何判定漂綠風險？</h3>
-                <p>每一件服飾都會根據<strong>「宣傳與材質一致性」</strong>、<strong>「國際認證門檻」</strong>與<strong>「混紡回收可行性」</strong>三大依據進行交叉查核，而非僅憑字面印象給分。</p>
+                <h3>🎯 我們如何判定漂綠與永續表現？</h3>
+                <p>同時支援<strong>實體拍照水洗標</strong>與<strong>網購下單前規格快篩</strong>，根據<strong>「宣傳與資訊透明度」</strong>、<strong>「國際認證加分門檻」</strong>與<strong>「混紡回收可行性」</strong>交叉查核，不因日常服飾無標章而一味扣分。</p>
             </div>
             """,
             unsafe_allow_html=True,
@@ -443,7 +750,7 @@ def render_scoring_guide(compact: bool = False) -> None:
             <div class="rubric-card risk-mid">
                 <div class="rubric-title">🟡 中風險｜資訊模糊或回收受限</div>
                 <div class="rubric-body">
-                    <strong>觸發條件：</strong>① 宣傳用語空泛（如「環境友善」）且缺少第三方認證佐證；或 ② 未作誇大宣傳，但材質屬<strong>第二級降級回收</strong>，或為<strong>無有機／無毒認證的一般傳統纖維</strong>。<br>
+                    <strong>觸發條件：</strong>① 宣傳用語空泛（如「環境友善」）或網購賣場隱藏比例／產地；或 ② 未作誇大宣傳，但材質屬<strong>第二級降級回收</strong>，或為<strong>無有機／無毒認證的一般傳統纖維</strong>。<br>
                     <strong>評分邏輯：</strong>雖無明顯造假，但供應鏈透明度不足，或傳統種植耗水、農藥與印染化學殘留仍具實質環境足跡。
                 </div>
             </div>
@@ -465,8 +772,8 @@ def render_scoring_guide(compact: bool = False) -> None:
         c1.markdown(
             """
             <div class="pillar-card">
-                <div class="pillar-title">1. 國際認證門檻</div>
-                <div class="pillar-text">區分具公信力的原料認證（GOTS、OCS、GRS、RCS）與無毒製程認證（OEKO-TEX、bluesign），排除品牌自創無效綠標。</div>
+                <div class="pillar-title">1. 透明揭露與認證加分</div>
+                <div class="pillar-text">日常服飾多無標章，認證屬信任加分項；若網購賣場未標示成分或產地，系統會自動產生賣家私訊提問範本。</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -483,8 +790,8 @@ def render_scoring_guide(compact: bool = False) -> None:
         c3.markdown(
             """
             <div class="pillar-card">
-                <div class="pillar-title">3. 漂綠七宗罪與足跡</div>
-                <div class="pillar-text">有宣傳時逐條比對七宗罪；若僅上傳水洗標，則自動轉為單獨體檢，解析該材質的耗水、印染風險與正確洗護方式。</div>
+                <div class="pillar-title">3. 七宗罪與延壽洗護</div>
+                <div class="pillar-text">拆解耗水、微塑膠與漂綠話術，並提供單次穿著成本計算、專屬洗護延壽與台灣在地汰換指引。</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -534,12 +841,14 @@ def open_scoring_guide_dialog() -> None:
 
 
 def render_report_dashboard(record: dict) -> None:
-    """以「頂部總覽卡 ＋ 分頁切換」渲染完成後的檢驗報告，並於各分頁底下顯示對應分級標準"""
-    report_text = fix_markdown_bold_delimiters(record["report"])
+    """以「頂部總覽卡 ＋ 4 大永續維度 ＋ 分頁切換」渲染完成後的檢驗報告"""
+    report_text = clean_report_text(record["report"])
     elapsed = record["elapsed"]
     retrieved_kb = record.get("kb_text", "")
+    is_online_mode = bool(record.get("is_online_mode", False))
     sections = parse_report_sections(report_text)
     kpi = extract_kpi_summary(report_text, sections)
+    sdata = record.get("sustain_data") or parse_sustain_data("", report_text, sections, kpi, is_online_mode)
 
     top_l, top_r = st.columns([3, 1.2])
     top_l.success(f"✅ 分析完成（總耗時 **{elapsed:.1f}** 秒）")
@@ -549,6 +858,7 @@ def render_report_dashboard(record: dict) -> None:
         st.warning("⚠️ 本次報告內容較長，末尾可能受限於單次輸出上限而略微截斷；建議可重新分析或精簡輸入文字。")
 
     render_kpi_cards(kpi)
+    render_sustain_dimensions(sdata)
     st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
     has_sec2 = 2 in sections
@@ -566,6 +876,7 @@ def render_report_dashboard(record: dict) -> None:
         with tab1:
             part12 = "\n\n".join(s for s in (sections.get(1), sections.get(2)) if s)
             st.markdown(part12 or report_text)
+            render_seller_question_box(sdata, is_online_mode)
             with st.expander("📖 什麼是 🔴 高風險／🟡 中風險／🟢 低風險？（風險評級標準說明）"):
                 render_scoring_guide(compact=True)
         with tab2:
@@ -573,11 +884,14 @@ def render_report_dashboard(record: dict) -> None:
             with st.expander("📖 什麼是第一級／第二級／第三級？（混紡回收難度分級說明）"):
                 render_recycling_guide()
         with tab3:
+            render_env_impact_bars(sdata)
             st.markdown(sections.get(4, "（本報告未獨立切出漂綠查核段落，請切換至「完整報告」檢視）"))
             with st.expander("📖 什麼是 🔴 高風險／🟡 中風險／🟢 低風險？（風險評級標準說明）"):
                 render_scoring_guide(compact=True)
         with tab4:
             st.markdown(sections.get(5, "（本報告未獨立切出洗護建議段落，請切換至「完整報告」檢視）"))
+            render_wear_longevity_calculator(record["id"])
+            render_taiwan_disposal_guide(kpi)
             with st.expander("📖 什麼是 🔴 高風險／🟡 中風險／🟢 低風險？（風險評級標準說明）"):
                 render_scoring_guide(compact=True)
         with tab5:
@@ -594,7 +908,11 @@ def render_report_dashboard(record: dict) -> None:
             with st.expander("📖 什麼是第一級／第二級／第三級？（混紡回收難度分級說明）"):
                 render_recycling_guide()
     else:
+        render_env_impact_bars(sdata)
         st.markdown(report_text)
+        render_seller_question_box(sdata, is_online_mode)
+        render_wear_longevity_calculator(record["id"])
+        render_taiwan_disposal_guide(kpi)
         st.download_button(
             "⬇️ 下載完整檢驗報告 (.md)",
             data=report_text.encode("utf-8"),
@@ -683,6 +1001,7 @@ def run_ai_analysis(
     image_bytes_list: list[bytes],
     claim_text: str,
     retrieved_kb: str,
+    is_online_mode: bool = False,
 ) -> dict | None:
     """執行多節點與雙模型輪替之串流快篩分析，完成後回傳結構化報告紀錄"""
     system_prompt = (
@@ -692,7 +1011,15 @@ def run_ai_analysis(
     )
 
     has_claim_text = bool(claim_text.strip())
-    if has_claim_text or len(image_bytes_list) > 1:
+    if is_online_mode:
+        mode_hint = (
+            "【本次輸入模式】：使用者處於「網購下單前（免水洗標）」模式，"
+            "僅有賣場文字規格或商品頁截圖，沒有實體水洗標照片。"
+            "請直接依已提供資訊評估永續與漂綠風險，具體點出未標示的成分比例／產地／彈性纖維缺口，"
+            "並在末尾 ===SUSTAIN_DATA=== 的『賣家提問』欄位產出禮貌實用的私訊提問範本；"
+            "完整輸出第 1～5 點（包含第 2 點【宣傳 vs. 實際成分交叉對照表】）。"
+        )
+    elif has_claim_text or len(image_bytes_list) > 1:
         mode_hint = (
             "【本次輸入模式】：使用者已提供多張圖片或品牌宣傳文字，"
             "請完整輸出第 1～5 點（包含第 2 點【宣傳 vs. 實際成分交叉對照表】）。"
@@ -788,7 +1115,7 @@ def run_ai_analysis(
                     # 節流重繪，大幅降低 WebSocket 與瀏覽器排版負荷
                     if now - last_render >= STREAM_UPDATE_INTERVAL:
                         last_render = now
-                        stream_md = clean_report_text("".join(chunks_buf)) + " ▌"
+                        stream_md = clean_report_text("".join(chunks_buf), strip_partial=True) + " ▌"
                         report_box.markdown(
                             f'<div data-gw-streaming="1" class="notranslate" translate="no">\n\n{stream_md}\n\n</div>',
                             unsafe_allow_html=True,
@@ -819,9 +1146,13 @@ def run_ai_analysis(
         clean_final = clean_report_text(full_text)
         if clean_final.count("**") % 2 == 1 and clean_final.rstrip().endswith("**"):
             clean_final = clean_final.rstrip()[:-2].rstrip()
+        parsed_sections = parse_report_sections(clean_final)
+        parsed_kpi = extract_kpi_summary(clean_final, parsed_sections)
+        sustain_data = parse_sustain_data(full_text, clean_final, parsed_sections, parsed_kpi, is_online_mode)
         preview = clean_final[:150]
         dot = "🔴" if "🔴" in preview else ("🟡" if "🟡" in preview else ("🟢" if "🟢" in preview else "⚪"))
-        snippet = claim_text.strip()[:14] + ("…" if len(claim_text.strip()) > 14 else "") if claim_text.strip() else "水洗標單獨體檢"
+        default_tag = "網購規格快篩" if is_online_mode else "水洗標單獨體檢"
+        snippet = claim_text.strip()[:14] + ("…" if len(claim_text.strip()) > 14 else "") if claim_text.strip() else default_tag
         return {
             "id": int(time.time() * 1000),
             "time": time.strftime("%H:%M:%S"),
@@ -830,6 +1161,8 @@ def run_ai_analysis(
             "elapsed": total_elapsed,
             "kb_text": retrieved_kb,
             "truncated": is_truncated,
+            "is_online_mode": is_online_mode,
+            "sustain_data": sustain_data,
         }
 
     # 失敗時以同類型的靜態紅框取代碼表並凍結秒數，避免跨元件替換觸發 React removeChild 錯誤
@@ -907,6 +1240,33 @@ section[data-testid="stSidebar"]{background-color:#EEECE4;border-right:1px solid
 .kpi-label{font-size:.76rem;font-weight:600;color:#627068;letter-spacing:.4px;margin-bottom:.25rem}
 .kpi-value{font-size:1.12rem;font-weight:700;color:#1C2721;margin-bottom:.22rem}
 .kpi-desc{font-size:.78rem;line-height:1.4;color:#55635B}
+.section-mini-title{font-size:.86rem;font-weight:700;color:#1E4635;margin:.75rem 0 .4rem;letter-spacing:.3px}
+.dim-card,.env-card{background:#FFFFFF;border:1px solid #E3E0D5;border-radius:10px;padding:.68rem .78rem;height:100%;box-shadow:0 1px 4px rgba(0,0,0,.025)}
+.dim-head{display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:.32rem;flex-wrap:wrap}
+.dim-title,.env-title{font-size:.82rem;font-weight:700;color:#1F2923}
+.dim-badge{font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.dim-badge.lvl-good{background:#E3F3EA;color:#1E6542}
+.dim-badge.lvl-mid{background:#FDF3DF;color:#9E6A0E}
+.dim-badge.lvl-bad{background:#FBE8E8;color:#A82929}
+.dim-badge.lvl-neutral{background:#EFEFE9;color:#55625A}
+.dim-desc{font-size:.75rem;line-height:1.4;color:#55635B}
+.env-bar-bg{background:#ECEAE0;height:7px;border-radius:999px;overflow:hidden;margin:.28rem 0 .35rem}
+.env-bar-fill{height:100%;border-radius:999px}
+.env-bar-fill.lvl-good{background:#2A7B52}
+.env-bar-fill.lvl-mid{background:#C98A1B}
+.env-bar-fill.lvl-bad{background:#C93B3B}
+.seller-box{background:#EEF6F1;border:1px solid #C2DEC9;border-left:5px solid #2A7B52;border-radius:10px;padding:.75rem .95rem;margin:.85rem 0 .4rem}
+.seller-box-title{font-size:.92rem;font-weight:700;color:#1E4635;margin-bottom:.2rem}
+.seller-box-sub{font-size:.8rem;color:#3E5448}
+.cpw-result{border:1px solid #E3E0D5;border-left-width:5px;border-radius:10px;padding:.8rem 1rem;margin-top:.35rem}
+.cpw-main{font-size:.98rem;color:#1C2721;margin-bottom:.25rem}
+.cpw-sub{font-size:.85rem;color:#2F3D35;margin-bottom:.35rem}
+.cpw-tip{font-size:.78rem;line-height:1.48;color:#55635B}
+.disposal-card{background:#FFFFFF;border:1px solid #E3E0D5;border-radius:10px;padding:.78rem .88rem;height:100%}
+.disposal-highlight{background:#F5FBF7;border:1.5px solid #2A7B52;box-shadow:0 2px 8px rgba(42,123,82,.08)}
+.disposal-title{font-size:.85rem;font-weight:700;color:#1E4635;margin-bottom:.3rem}
+.disposal-text{font-size:.79rem;line-height:1.5;color:#3E4C44}
+.tag-best{display:inline-block;background:#E3F3EA;color:#1E6542;font-size:.7rem;padding:1px 6px;border-radius:999px;margin-left:4px}
 .risk-high{border-color:#E7C6C4;border-left-color:#C93B3B!important;border-top-color:#C93B3B!important;background:#FFFBFB}
 .risk-mid{border-color:#EADBB5;border-left-color:#C98A1B!important;border-top-color:#C98A1B!important;background:#FFFDF7}
 .risk-low{border-color:#C3DEC9;border-left-color:#2A7B52!important;border-top-color:#2A7B52!important;background:#F9FDFB}
@@ -922,12 +1282,11 @@ section[data-testid="stSidebar"]{background-color:#EEECE4;border-right:1px solid
 with st.sidebar:
     st.header("🌿 工具簡介")
     st.markdown(
-        "協助消費者快速比對服飾的**品牌環保宣稱**與**實際水洗標成分**，涵蓋 5 大檢驗面向：\n"
-        "- **風險評級**：紅／黃／綠燈判定漂綠疑慮\n"
-        "- **成分與認證對照**：核對材質與第三方標章\n"
-        "- **混紡回收難度**：解析三級回收可行性\n"
-        "- **漂綠與環境足跡**：查核七宗罪與製程風險\n"
-        "- **洗護與永續建議**：延長壽命與替代選購"
+        "協助消費者快速比對服飾的**品牌環保宣稱**與**實際材質成分**，涵蓋完整永續體檢：\n"
+        "- **網購免水洗標快篩**：沒標籤也能查缺漏並生成賣家提問\n"
+        "- **4 大永續體檢維度**：透明度、循環力、誠實度與認證加分\n"
+        "- **混紡回收與環境足跡**：解析三級回收、耗水與微塑膠風險\n"
+        "- **延壽洗護與在地汰換**：單次穿著成本計算與台灣循環去處"
     )
 
     st.divider()
@@ -972,19 +1331,48 @@ col_input, col_stage = st.columns([1, 1.38], gap="large")
 
 with col_input:
     with st.container(border=True):
-        st.subheader("📸 步驟一：上傳或拍攝水洗標")
-        uploaded_files = st.file_uploader(
-            "可上傳「成分水洗標（必填）」、「環保吊牌」、「實體海報」或「網購商品頁截圖」",
-            type=["jpg", "jpeg", "png", "webp"],
-            accept_multiple_files=True,
-            key="unified_uploader",
+        input_mode = st.radio(
+            "選擇檢驗情境",
+            ("🏷️ 現場／已有衣服（拍水洗標）", "🛒 網購下單前（免水洗標）"),
+            horizontal=True,
         )
-        enable_camera = st.toggle("📷 啟用相機現場拍攝（適合手機逛街實測）", value=False)
-        camera_photo = st.camera_input("對準衣物水洗標或吊牌拍照") if enable_camera else None
+        is_online_mode = input_mode.startswith("🛒")
+
+        if is_online_mode:
+            st.subheader("📝 步驟一：貼上賣場材質規格與宣傳文案")
+            claim_text = st.text_area(
+                "貼上賣場寫的成分說明、產地或環保宣傳（就算商家沒寫比例也可直接貼上）：",
+                placeholder="例如：賣場寫『親膚環保棉質、永續穿搭首選』，規格寫『棉 65%、聚酯纖維 35%』（若賣場完全沒寫比例也直接貼上，AI 會幫你抓出缺漏並生成賣家提問！）",
+                height=120,
+                max_chars=MAX_CLAIM_CHARS,
+                label_visibility="collapsed",
+            )
+            st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+            st.subheader("🖼️ 步驟二：網購商品頁／規格區截圖（選填）")
+            uploaded_files = st.file_uploader(
+                f"可上傳網購商品頁、材質規格表或賣場宣稱截圖（最多 {MAX_IMAGES} 張）",
+                type=["jpg", "jpeg", "png", "webp"],
+                accept_multiple_files=True,
+                key="unified_uploader",
+            )
+            camera_photo = None
+        else:
+            st.subheader("📸 步驟一：上傳或拍攝水洗標")
+            uploaded_files = st.file_uploader(
+                f"可上傳「成分水洗標」、「環保吊牌」、「實體海報」或「商品頁截圖」（最多 {MAX_IMAGES} 張）",
+                type=["jpg", "jpeg", "png", "webp"],
+                accept_multiple_files=True,
+                key="unified_uploader",
+            )
+            enable_camera = st.toggle("📷 啟用相機現場拍攝（適合手機逛街實測）", value=False)
+            camera_photo = st.camera_input("對準衣物水洗標或吊牌拍照") if enable_camera else None
 
         raw_inputs = list(uploaded_files or [])
         if camera_photo is not None:
             raw_inputs.append(camera_photo)
+        if len(raw_inputs) > MAX_IMAGES:
+            st.warning(f"⚠️ 單次分析上限為 {MAX_IMAGES} 張圖片，已自動採用前 {MAX_IMAGES} 張。")
+            raw_inputs = raw_inputs[:MAX_IMAGES]
 
         processed_images: list[bytes] = []
         if raw_inputs:
@@ -995,22 +1383,24 @@ with col_input:
                 with thumb_cols[i % 3]:
                     st.image(img_bytes, caption=f"圖片 {i + 1} ({len(img_bytes) // 1024}KB)")
 
-        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-        st.subheader("📝 步驟二：品牌宣傳文案（選填）")
-        claim_text = st.text_area(
-            "貼上商品頁面描述、環保宣言或吊牌文案（未填寫則自動進行水洗標單獨體檢）：",
-            placeholder="例如：本款採用 Eco-Conscious 環境友善純淨棉料製成，愛地球永續穿搭首選...",
-            height=115,
-            label_visibility="collapsed",
-        )
+        if not is_online_mode:
+            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+            st.subheader("📝 步驟二：品牌宣傳文案（選填）")
+            claim_text = st.text_area(
+                "貼上商品頁面描述、環保宣言或吊牌文案（未填寫則自動進行水洗標單獨體檢）：",
+                placeholder="例如：本款採用 Eco-Conscious 環境友善純淨棉料製成，愛地球永續穿搭首選...",
+                height=115,
+                max_chars=MAX_CLAIM_CHARS,
+                label_visibility="collapsed",
+            )
 
-        run_real_ai = st.button("🔍 開始 AI 漂綠快篩分析", type="primary", use_container_width=True)
-        st.caption("💡 圖片僅於記憶體即時判讀，絕不儲存於硬碟；未提供宣傳文案時，系統自動針對水洗標材質與認證進行單獨體檢。")
+        run_real_ai = st.button("🔍 開始 AI 永續快篩分析", type="primary", use_container_width=True)
+        st.caption("💡 圖片僅於記憶體即時判讀，絕不儲存於硬碟；網購無水洗標或未附國際認證時，系統仍會公正體檢並附上賣家提問範本。")
 
 with col_stage:
     if run_real_ai:
         if not processed_images and not claim_text.strip():
-            st.warning("👆 請先在左側上傳一張照片（水洗標或宣傳圖），或輸入一段品牌宣傳文案再開始分析！")
+            st.warning("👆 請先在左側上傳照片，或貼上賣場規格與宣傳文案再開始分析！")
             if st.session_state["current_report"]:
                 render_report_dashboard(st.session_state["current_report"])
             else:
@@ -1029,6 +1419,7 @@ with col_stage:
                 image_bytes_list=processed_images,
                 claim_text=claim_text,
                 retrieved_kb=retrieved_kb,
+                is_online_mode=is_online_mode,
             )
             if result:
                 st.session_state["current_report"] = result
