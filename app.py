@@ -117,7 +117,7 @@ BASE_SYSTEM_PROMPT = """你是專業的「服飾消費品漂綠審查員」。�
 誠實度: 高|中|低 | 18字內白話說明
 認證背書: 有|無 | 實際檢出標章，或填「日常多無標章（屬加分項）」
 耗水量: 高|中|低 | 14字內白話說明
-微塑膠: 高|中|低 | 14字內白話說明
+微塑膠: 高|中|低|無 | 14字內白話說明（100%天然纖維請填無）
 分解性: 易|中|難 | 14字內白話說明
 回收度: 易|中|難 | 14字內白話說明
 賣家提問: （資訊完整填「無」；若有缺漏成分比例／產地／彈性纖維／認證，寫一段 40～90 字禮貌自然的繁中私訊賣家提問句）
@@ -429,11 +429,66 @@ def extract_kpi_summary(report_text: str, sections: dict[int, str]) -> dict[str,
     return {"risk": risk, "recycling": recycling, "certs": certs}
 
 
+_NEG_FIBER_TOKENS = ("不含", "無", "未含", "沒有", "不同於", "不像", "非", "避免", "零", "不必", "不需")
+_NON_FIBER_NEG_RE = re.compile(r"無(?:第三方|國際|有機|毒|標章|認證)")
+_SYNTH_FIBER_TERMS = ("聚酯", "polyester", "尼龍", "nylon", "壓克力", "亞克力", "彈性纖維", "spandex", "elastane", "人造纖維", "化纖")
+_NATURAL_FIBER_TERMS = ("純棉", "棉", "cotton", "亞麻", "linen", "羊毛", "wool", "蠶絲", "silk", "天然纖維")
+
+
 def _norm_level(val: str, valid: tuple[str, ...], default: str) -> str:
-    for opt in valid:
-        if opt in val:
-            return opt
+    """將模型輸出的程度詞（含常見同義詞如零／極低）正規化為標準分級"""
+    s = val.strip()
+    if "無" in valid and "高" in valid:
+        rules = (
+            ("無", ("無微塑膠", "無風險", "零微塑膠", "沒有", "無", "零")),
+            ("低", ("極低", "很少", "低", "少")),
+            ("中", ("普通", "一般", "中")),
+            ("高", ("極高", "高", "強")),
+        )
+    elif valid == ("高", "中", "低"):
+        rules = (
+            ("低", ("極低", "沒有", "無", "零", "很少", "少", "弱", "低")),
+            ("中", ("普通", "一般", "中")),
+            ("高", ("極高", "高", "強")),
+        )
+    elif valid == ("易", "中", "難"):
+        rules = (
+            ("難", ("極難", "困難", "無法", "不可", "難", "低", "差")),
+            ("中", ("普通", "尚可", "中")),
+            ("易", ("極易", "容易", "易", "高", "佳", "好")),
+        )
+    elif valid == ("有", "無"):
+        rules = (
+            ("無", ("沒有", "未見", "未檢出", "無")),
+            ("有", ("具備", "通過", "有")),
+        )
+    else:
+        rules = tuple((opt, (opt,)) for opt in valid)
+
+    for target, tokens in rules:
+        if target in valid and any(tok in s for tok in tokens):
+            return target
     return default
+
+
+def _detect_fiber_flags(sec1_text: str, fallback_text: str) -> tuple[bool, bool]:
+    """從第 1 區實物辨識句偵測是否含合成纖維或天然植物纖維，略過「不含聚酯」等否定子句"""
+    def _scan(text: str) -> tuple[bool, bool]:
+        has_s, has_c = False, False
+        for raw_clause in re.split(r"[；;，,。\n（(]", text):
+            clause = _NON_FIBER_NEG_RE.sub("", raw_clause).lower()
+            if any(neg in clause for neg in _NEG_FIBER_TOKENS):
+                continue
+            if any(t in clause for t in _SYNTH_FIBER_TERMS):
+                has_s = True
+            if any(t in clause for t in _NATURAL_FIBER_TERMS):
+                has_c = True
+        return has_s, has_c
+
+    has_synth, has_cotton = _scan(sec1_text) if sec1_text else (False, False)
+    if not has_synth and not has_cotton and fallback_text:
+        has_synth, has_cotton = _scan(fallback_text)
+    return has_synth, has_cotton
 
 
 def parse_sustain_data(
@@ -465,7 +520,6 @@ def parse_sustain_data(
         return {"level": default_lvl, "desc": default_desc}
 
     # 依報告既有線索準備穩健的預設值
-    text_lower = (report_text or "").lower()
     risk_title = kpi["risk"][0]
     rec_title = kpi["recycling"][0]
     has_cert = kpi["certs"][0].startswith("✅")
@@ -486,10 +540,9 @@ def parse_sustain_data(
         else ("建議向賣家補齊細節資訊" if def_trans_lvl == "中" else "成分與基本標示尚屬明確")
     )
 
-    has_synth = any(w in text_lower for w in ("聚酯", "polyester", "尼龍", "nylon", "壓克力", "亞克力", "彈性纖維", "spandex", "elastane", "人造纖維", "化纖"))
-    has_cotton = any(w in text_lower for w in ("純棉", "棉", "cotton"))
+    has_synth, has_cotton = _detect_fiber_flags(sections.get(1, ""), report_text or "")
     def_water = ("高", "傳統棉花種植耗水量較高") if has_cotton else (("低", "化纖製程耗水較天然棉低") if has_synth else ("中", "視原料與染整製程而定"))
-    def_micro = ("高", "洗滌易釋放合成微塑膠纖維") if has_synth else (("低", "天然植物纖維無塑膠微粒") if has_cotton else ("中", "需視混紡化纖比例而定"))
+    def_micro = ("高", "洗滌易釋放合成微塑膠纖維") if has_synth else (("無", "天然植物纖維無塑膠微粒") if has_cotton else ("中", "需視混紡化纖比例而定"))
     def_bio = ("難", "合成塑膠纖維極難自然分解") if has_synth else (("易", "天然純質纖維較容易分解") if has_cotton else ("中", "混紡或塗層會拖慢分解"))
     def_rec_env = ("易" if def_rec_lvl == "高" else ("中" if def_rec_lvl == "中" else "難"), def_rec_desc[:14])
 
@@ -504,9 +557,17 @@ def parse_sustain_data(
     )
 
     water = _split_pair("耗水量", ("高", "中", "低"), *def_water)
-    microplastic = _split_pair("微塑膠", ("高", "中", "低"), *def_micro)
+    microplastic = _split_pair("微塑膠", ("無", "低", "中", "高"), *def_micro)
     biodeg = _split_pair("分解性", ("易", "中", "難"), *def_bio)
     recyclability = _split_pair("回收度", ("易", "中", "難"), *def_rec_env)
+
+    # 標籤與白話說明一致性防呆：避免「零微塑膠」卻顯示紅燈「高」
+    micro_desc = microplastic["desc"]
+    if any(t in micro_desc for t in ("零微塑膠", "無微塑膠", "無塑膠微粒", "不含塑膠", "不釋放微塑膠", "不會釋放微塑膠", "無微塑膠排放")) and "釋放合成" not in micro_desc:
+        microplastic["level"] = "無"
+    water_desc = water["desc"]
+    if any(t in water_desc for t in ("極低", "耗水低", "低耗水", "省水")) and "高" not in water_desc:
+        water["level"] = "低"
 
     seller_q = fields.get("賣家提問", "").strip()
     if seller_q in ("無", "無須", "不需要", "完整", "無需提問", "N/A", "-"):
@@ -611,7 +672,7 @@ def render_env_impact_bars(sdata: dict) -> None:
     # 耗水量與微塑膠：越低越友善(綠)；分解性與回收度：越易越友善(綠)
     specs = [
         ("💧 耗水程度", env["water"], {"低": ("lvl-good", 30), "中": ("lvl-mid", 65), "高": ("lvl-bad", 100)}),
-        ("🫧 微塑膠風險", env["microplastic"], {"低": ("lvl-good", 30), "中": ("lvl-mid", 65), "高": ("lvl-bad", 100)}),
+        ("🫧 微塑膠風險", env["microplastic"], {"無": ("lvl-good", 12), "低": ("lvl-good", 30), "中": ("lvl-mid", 65), "高": ("lvl-bad", 100)}),
         ("🍂 自然分解性", env["biodeg"], {"易": ("lvl-good", 95), "中": ("lvl-mid", 60), "難": ("lvl-bad", 28)}),
         ("♻️ 循環回收度", env["recyclability"], {"易": ("lvl-good", 95), "中": ("lvl-mid", 60), "難": ("lvl-bad", 28)}),
     ]
