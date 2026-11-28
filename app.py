@@ -45,8 +45,8 @@ _SUSTAIN_META_BLOCK_RE = re.compile(
 )
 
 KNOWN_CERTS = (
-    "GOTS", "OCS", "GRS", "RCS", "OEKO-TEX", "bluesign",
-    "Cradle to Cradle", "Fair Trade", "FSC", "RDS", "RWS", "BCI",
+    "GOTS", "OCS", "GRS", "RCS", "OEKO-TEX", "MADE IN GREEN", "bluesign",
+    "IVN BEST", "EU Ecolabel", "Cradle to Cradle", "Fair Trade", "FSC", "RDS", "RWS", "BCI",
 )
 
 # 預先轉小寫的核心領域關鍵詞（避免檢索迴圈重複配置字串）
@@ -75,8 +75,8 @@ BASE_SYSTEM_PROMPT = """你是專業的「服飾消費品漂綠審查員」。�
    - **全程嚴禁輸出任何簡體字**（務必使用標準台灣繁體中文，例如「誤以為」不可寫成簡體字形）；使用粗體 `**` 強調文字時，`**` 內側不可多出空白（不可寫成 `**文字 **`），若緊鄰引號請將 `**` 寫在引號裡面（例如 `「**第一級**」`）。
    - 風險評級首行用詞必須嚴格統一為以下三者之一（一字不差）：
      - `🔴 高風險（高度漂綠疑慮）`
-     - `🟡 中風險（資訊模糊或回收受限）`
-     - `🟢 低風險（具公信力認證或純質易回收）`
+     - `🟡 中風險（資訊模糊或行銷偏誇大）`
+     - `🟢 低風險（無漂綠疑慮或宣稱相符）`
    - 若輸出交叉對照表，表格標題固定為：`| 品牌宣傳宣稱 | 水洗標實際成分與產地 | 辨識到的第三方認證標章 |`。
 
 6. **網購無水洗標情境與日常無標章公平判讀**：
@@ -89,9 +89,12 @@ BASE_SYSTEM_PROMPT = """你是專業的「服飾消費品漂綠審查員」。�
      2. **專利代稱 vs. 法定化學成分查核**：若賣場僅寫「環保再生纖維」或品牌專利布料名卻未標示法定纖維名稱（如聚酯纖維、尼龍）與比例，應明確點出資訊缺口；若同時宣稱「彈力」與「100% 再生纖維」，須提醒確認是否含彈性纖維（Spandex／Elastane）；若屬寶特瓶再生聚酯（rPET），須白話提醒其洗滌微塑膠與「瓶到衣」難再閉環回收的環境權衡。
      3. **絕對比較詞查核**：若使用「市售最環保、最高等級、100% 零污染」等絕對最高級詞彙卻未提供第三方檢測或生命週期比較數據，應直指其欠缺佐證。
    - **【軌道 B｜商家未拿環保永續當賣點（僅介紹舒適、透氣、彈性、版型、科技機能如 `Re-Flex™`，或純粹標示成分與洗標）】**：採用**委婉客觀的消費者補充提醒語氣**——**嚴禁**將機能名稱或一般純棉硬扣「觸犯漂綠七宗罪（如模糊不清、隱藏權衡）」，也**嚴禁**使用「隱瞞、包裝成高科技、無法保證不含甲醛／重金屬、牢度較弱」等否定或指控賣家的字眼！應明確宣告「✅ 未檢出漂綠行為（本商品未主打環保人設，不構成漂綠）」，正面肯定誠實揭露處，再以友善中立的口吻向**消費者**補充賣場未提及的產業常態與環境背景（如一般棉耗水屬產業常態、珍惜久穿最能攤平足跡、深色棉穿前先冷水過水更安心、機能名詞與環保認證不同等）；且若成分與產地誠實揭露無誇大環保宣稱，末尾 `===SUSTAIN_DATA===` 的 `誠實度` 請評為 `高`。
-8. **風險評級公正校準與防誤判鐵則（極重要）**：
+8. **雙核心獨立評分與防誤判鐵則（極重要）**：
+   - **雙軸各自獨立，不互相混淆**：
+     - **軸線 ① 漂綠風險評級（🔴／🟡／🟢）**：純看「商家有沒有說謊、誇大環保、假標籤或名實不符」。凡**未拿環保永續當賣點且揭露誠實者**，漂綠風險必為 **`🟢 低風險（無漂綠疑慮或宣稱相符）`**。
+     - **軸線 ② 永續表現分級（🌿 A／🌱 B／🍂 C／🪨 D）**：純看「衣服本身對地球的實際友善度」，嚴格依知識庫 `05_sustainability_grading_zh.docx` 之認證分層、六大高環境負擔紅旗與四級硬條件判定——**絕不因沒漂綠就自動給 A 級**，一般無認證純棉判為 **B 級**，再生聚酯／混紡／高負擔材質則依規判為 **C 級或 D 級**。
    - **🔴 高風險 vs 🟡 中風險紅線校準**：
-     - 若商品**確實採用具公信力大廠之再生或有機原料**（例如台灣或國際大廠經 GRS 認證之再生紗線），僅因「將上游紗線認證寫成成品認證、未標示成衣許可字號、行銷用詞偏誇大（如『市售最環保』）或附自繪綠葉標示」等合規與包裝瑕疵，應判定為 **`🟡 中風險（資訊模糊或回收受限）`**，並正面肯定其原料永續投入、同時誠實指出合規落差與誇大處。
+     - 若商品**確實採用具公信力大廠之再生或有機原料**（例如台灣或國際大廠經 GRS 認證之再生紗線），僅因「將上游紗線認證寫成成品認證、未標示成衣許可字號、行銷用詞偏誇大（如『市售最環保』）或附自繪綠葉標示」等合規與包裝瑕疵，應判定為 **`🟡 中風險（資訊模糊或行銷偏誇大）`**，並正面肯定其原料永續投入、同時誠實指出合規落差與誇大處。
      - **`🔴 高風險` 僅保留給**：① 毫無實質環保投入或材質屬第三級不可回收混紡，卻大肆宣稱環保永續；或 ② 宣稱與實物存在明確造假矛盾。
    - **禁止「未審先判」式猜測加罪**：當賣場或原廠資料已明確說明係以「針織組織結構提供彈性」或「速乾排汗減少細菌滋生」時，**不得**憑空假設其「偷加彈性纖維」或「偷加銀離子化學抗菌劑」來拉高風險評級；僅可客觀提醒消費者下單前或收到實品後核對水洗標確認。
    - **防漏截誤判與自動過濾雜訊**：
@@ -101,10 +104,11 @@ BASE_SYSTEM_PROMPT = """你是專業的「服飾消費品漂綠審查員」。�
 請用繁體中文依以下架構輸出報告：
 
 ### 1. 【風險評級】
-第一行僅輸出標準風險標籤（`🔴 高風險（高度漂綠疑慮）`、`🟡 中風險（資訊模糊或回收受限）` 或 `🟢 低風險（具公信力認證或純質易回收）`）。
-空一行後依序詳細說明判定原因（遇任何英文等級、驗證機構或專業縮寫皆須用白話解釋意思）：
+第一行僅輸出標準漂綠風險標籤（`🔴 高風險（高度漂綠疑慮）`、`🟡 中風險（資訊模糊或行銷偏誇大）` 或 `🟢 低風險（無漂綠疑慮或宣稱相符）`）。
+空一行後依序詳細說明雙核心總評（遇任何英文等級、驗證機構或專業縮寫皆須用白話解釋意思）：
+- **永續表現分級（A～D 級）**：明確寫出本件衣服依據知識庫四級標準屬於 **🌿 A 級（標竿永續）**、**🌱 B 級（日常友善）**、**🍂 C 級（權衡待改善）** 或 **🪨 D 級（高環境負擔）**，並用一句白話說明觸發該級別之具體材質／認證／紅旗依據。
 - **本次實物與認證辨識**：用白話清楚列出辨識到的纖維成分與比例、產地標示（若賣場或圖片未標示請明確寫出「未揭露」），以及實際檢出的第三方認證標章（若有出現等級名稱、驗證機構代碼或許可字號，請一併翻譯成白話意義；若無則標示「未見第三方國際認證（日常服飾常見，屬信任加分項）」）。
-- **三大依據判定理由**：分別針對「① 宣傳與材質一致性（含資訊透明度，無環保宣稱時切勿指控漂綠）」、「② 國際認證加分門檻」、「③ 混紡回收分級」逐一說明本件衣服觸發此風險等級的具體原因與知識庫判讀依據。
+- **三大依據判定理由**：分別針對「① 宣傳與材質一致性（含資訊透明度，無環保宣稱時切勿指控漂綠）」、「② 國際認證加分門檻」、「③ 混紡回收分級」逐一說明本件衣服觸發漂綠風險與永續分級的具體原因。
 
 ### 2. 【宣傳 vs. 實際成分交叉對照表】
 （僅在提供品牌宣傳文案／宣傳圖／網購賣場規格，或照片內含環保宣傳標語時輸出；單純單張水洗標體檢請直接省略本區塊，並將後方章節直接順編為 2、3、4）
@@ -129,8 +133,9 @@ BASE_SYSTEM_PROMPT = """你是專業的「服飾消費品漂綠審查員」。�
 - **替代選購與台灣在地循環去處指引**：依據本件欠缺的永續環節，明確推薦應優先選擇的認證標章（簡要白話說明該標章代表什麼把關）或單一純質替代材質；同時提供這件衣服未來汰換時在台灣最適合的循環去處（如八成新以上優先二手轉售／換衣市集／社福捐贈；破損的第一級純棉可剪裁為抹布或送單一材質回收；破損的第二、三級混紡或含彈性纖維切勿誤投只收堪穿二手衣的街頭舊衣回收箱）。
 
 【報告最末尾必附結構化摘要區塊】（請務必接在整份報告最後一行之後，勿寫在報告正文內）：
-請嚴格使用以下格式輸出 9 行欄位，供系統繪製永續儀表板與賣家提問範本：
+請嚴格使用以下格式輸出 10 行欄位，供系統繪製永續儀表板與賣家提問範本：
 ===SUSTAIN_DATA===
+永續表現: A|B|C|D | 18字內白話說明（依知識庫 05 四級準則判定）
 透明度: 高|中|低 | 18字內白話說明
 循環力: 高|中|低 | 18字內白話說明
 誠實度: 高|中|低 | 18字內白話說明
@@ -516,15 +521,15 @@ def _extract_certs_from_text(text: str) -> list[str]:
 
 
 def extract_kpi_summary(report_text: str, sections: dict[int, str]) -> dict[str, tuple[str, str, str]]:
-    """從報告內容萃取頂部 3 張體檢總覽卡資料（風險評級、回收分級、國際認證）"""
-    # 1. 風險評級（與系統標準用詞一致）
+    """從報告內容萃取頂部體檢總覽卡資料（漂綠風險、回收分級、國際認證）"""
+    # 1. 漂綠風險評級（純看行銷誠實度，與永續表現 A～D 分開呈現）
     preview = report_text[:260]
     if "🔴" in preview or "高風險" in preview:
-        risk = ("🔴 高風險", "高度漂綠疑慮｜宣傳與實物或回收／認證落差明顯", "risk-high")
+        risk = ("🔴 高風險", "高度漂綠疑慮｜無實質環保投入卻誇大宣傳或造假", "risk-high")
     elif "🟡" in preview or "中風險" in preview:
-        risk = ("🟡 中風險", "資訊模糊或回收受限｜缺第三方認證或具製程足跡", "risk-mid")
+        risk = ("🟡 中風險", "資訊模糊或行銷偏誇大｜認證範圍不清或用語缺佐證", "risk-mid")
     elif "🟢" in preview or "低風險" in preview:
-        risk = ("🟢 低風險", "具公信力認證或純質易回收｜標示相符且永續表現佳", "risk-low")
+        risk = ("🟢 低風險", "無漂綠疑慮｜未誇大環保宣稱或認證與實物相符", "risk-low")
     else:
         risk = ("⚪ 已完成", "請見下方各面向詳細查核結果", "risk-neutral")
 
@@ -594,6 +599,12 @@ def _norm_level(val: str, valid: tuple[str, ...], default: str) -> str:
             ("無", ("沒有", "未見", "未檢出", "無")),
             ("有", ("具備", "通過", "有")),
         )
+    elif valid == ("A", "B", "C", "D"):
+        su = s.upper()
+        for opt in ("A", "B", "C", "D"):
+            if opt in su:
+                return opt
+        return default
     else:
         rules = tuple((opt, (opt,)) for opt in valid)
 
@@ -701,6 +712,30 @@ def parse_sustain_data(
     if any(t in water_desc for t in ("極低", "耗水低", "低耗水", "省水")) and "高" not in water_desc:
         water["level"] = "低"
 
+    # 永續表現 A／B／C／D 備援計算與一致性防呆
+    tl = (report_text or "").lower()
+    has_d_redflag = any(
+        tok in tl
+        for tok in ("pvc", "聚氯乙烯", "壓克力", "acrylic", "僅限乾洗", "dry clean only", "傳統 pfas", "含氟防潑水")
+    )
+    if has_d_redflag or ("第三級" in rec_title and not has_cert):
+        def_eco = ("D", "觸發難回收混紡或高環境負擔紅旗")
+    elif has_cert and "第一級" in rec_title and not has_synth:
+        def_eco = ("A", "具權威認證且屬單一純質易回收")
+    elif "第一級" in rec_title and has_cotton and not has_synth:
+        def_eco = ("B", "單一天然純質零微塑膠・無認證日常款")
+    elif "第二級" in rec_title or has_synth or is_online_mode:
+        def_eco = ("C", "具微塑膠／降級回收或資訊揭露權衡")
+    else:
+        def_eco = ("B", "無高負擔紅旗之日常基礎材質")
+
+    eco_grade = _split_pair("永續表現", ("A", "B", "C", "D"), *def_eco)
+    if eco_grade["level"] == "A" and not has_cert:
+        eco_grade = {
+            "level": "B",
+            "desc": eco_grade["desc"] if "認證" not in eco_grade["desc"] else "單一純質友善，缺全面性認證屬日常款",
+        }
+
     seller_q = fields.get("賣家提問", "").strip()
     if seller_q in ("無", "無須", "不需要", "完整", "無需提問", "N/A", "-"):
         seller_q = ""
@@ -711,6 +746,7 @@ def parse_sustain_data(
         )
 
     return {
+        "eco_grade": eco_grade,
         "dims": {
             "transparency": transparency,
             "circularity": circularity,
@@ -727,14 +763,23 @@ def parse_sustain_data(
     }
 
 
-def render_kpi_cards(kpi: dict[str, tuple[str, str, str]]) -> None:
-    """渲染報告頂部的 3 張視覺化體檢總覽卡"""
+def render_kpi_cards(kpi: dict[str, tuple[str, str, str]], sdata: dict | None = None) -> None:
+    """渲染報告頂部的 4 張視覺化體檢總覽卡（漂綠風險 × 永續表現 A～D × 混紡回收 × 國際認證）"""
+    eco = (sdata or {}).get("eco_grade", {"level": "B", "desc": "依材質與認證綜合評估"})
+    eco_map = {
+        "A": ("🌿 A 級｜標竿永續", eco["desc"], "risk-low"),
+        "B": ("🌱 B 級｜日常友善", eco["desc"], "risk-b"),
+        "C": ("🍂 C 級｜權衡待改善", eco["desc"], "risk-mid"),
+        "D": ("🪨 D 級｜高環境負擔", eco["desc"], "risk-high"),
+    }
+    eco_card = eco_map.get(eco.get("level", "B"), ("🌱 B 級｜日常友善", eco["desc"], "risk-b"))
     cards = [
         ("漂綠風險評級", *kpi["risk"]),
+        ("永續表現分級", *eco_card),
         ("混紡回收分級", *kpi["recycling"]),
-        ("國際認證標章（加分項）", *kpi["certs"]),
+        ("國際認證（加分項）", *kpi["certs"]),
     ]
-    cols = st.columns(3)
+    cols = st.columns(4)
     for col, (label, value, desc, style_cls) in zip(cols, cards):
         col.markdown(
             f"""
@@ -917,41 +962,39 @@ def render_taiwan_disposal_guide(kpi: dict[str, tuple[str, str, str]]) -> None:
 
 
 def render_scoring_guide(compact: bool = False) -> None:
-    """呈現清楚、合乎邏輯且精煉的「風險評級標準與三大判讀依據」"""
+    """呈現雙核心「漂綠風險 3 檔 × 永續表現 A～D 4 級」標準與三大查核支柱"""
     if not compact:
         st.markdown(
             """
             <div class="guide-hero">
-                <div class="guide-kicker">SCORING FRAMEWORK</div>
-                <h3>🎯 我們如何判定漂綠與永續表現？</h3>
-                <p>同時支援<strong>實體拍照水洗標</strong>與<strong>網購下單前規格快篩</strong>，根據<strong>「宣傳與資訊透明度」</strong>、<strong>「國際認證加分門檻」</strong>與<strong>「混紡回收可行性」</strong>交叉查核，不因日常服飾無標章而一味扣分。</p>
+                <div class="guide-kicker">DUAL-CORE FRAMEWORK</div>
+                <h3>🎯 我們如何判定漂綠風險與永續表現？</h3>
+                <p>本系統採<strong>「雙核心獨立評分」</strong>：<strong>漂綠風險（🔴／🟡／🟢）</strong>純看商家有沒有誇大環保或名實不符；<strong>永續表現分級（🌿 A～🪨 D 級）</strong>則純看衣服本身對地球的友善度，讓「沒漂綠但為一般傳統或混紡衣」也能獲得客觀評估。</p>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
+    st.markdown("<div class='section-mini-title'>① 漂綠風險評級（純評行銷誠實度）</div>", unsafe_allow_html=True)
     st.markdown(
         """
         <div class="rubric-grid">
             <div class="rubric-card risk-high">
                 <div class="rubric-title">🔴 高風險｜高度漂綠疑慮</div>
                 <div class="rubric-body">
-                    <strong>觸發條件：</strong>品牌主動強調環保、永續或使用自繪樹葉標章，但水洗標實際為<strong>無國際認證的異質混紡或含彈性纖維（第三級不可回收）</strong>。<br>
-                    <strong>評分邏輯：</strong>行銷宣稱與實際回收／製程表現明顯矛盾，觸犯「無證據、假標籤或隱藏權衡」等漂綠特徵，最容易誤導消費決策。
+                    <strong>觸發條件：</strong>無實質環保投入或材質屬第三級不可回收混紡，卻大打環保、永續牌，或宣稱與實物存在明確造假矛盾。
                 </div>
             </div>
             <div class="rubric-card risk-mid">
-                <div class="rubric-title">🟡 中風險｜資訊模糊或回收受限</div>
+                <div class="rubric-title">🟡 中風險｜資訊模糊或行銷偏誇大</div>
                 <div class="rubric-body">
-                    <strong>觸發條件：</strong>① 雖有採用大廠再生／有機原料，但將上游紗線認證寫成成品認證、缺字號或行銷偏誇大；② 賣場隱藏比例／產地；或 ③ 材質屬<strong>第二級降級回收</strong>或無認證傳統纖維。<br>
-                    <strong>評分邏輯：</strong>非完全造假，但供應鏈揭露或認證範圍仍不夠嚴謹，或製程仍具實質環境足跡。
+                    <strong>觸發條件：</strong>雖採用大廠再生／有機原料，但將上游紗線認證寫成成衣認證、缺字號、使用自繪綠標／最高級用語，或網購隱藏關鍵比例與產地。
                 </div>
             </div>
             <div class="rubric-card risk-low">
-                <div class="rubric-title">🟢 低風險｜具公信力認證或純質易回收</div>
+                <div class="rubric-title">🟢 低風險｜無漂綠疑慮或宣稱相符</div>
                 <div class="rubric-body">
-                    <strong>觸發條件：</strong>宣稱與實際成分相符，具備可驗證的國際認證（如 <strong>GOTS、GRS、OEKO-TEX Standard 100、bluesign</strong>），且屬<strong>第一級 100% 單一純質</strong>或合規再生材質。<br>
-                    <strong>評分邏輯：</strong>有第三方機構把關原料與製程安全，且衣物汰換後具備較高的循環再生價值。
+                    <strong>觸發條件：</strong>商家未拿環保當賣點且揭露誠實，或宣稱與實物及第三方認證完全相符（沒吹牛＝低漂綠風險）。
                 </div>
             </div>
         </div>
@@ -959,14 +1002,40 @@ def render_scoring_guide(compact: bool = False) -> None:
         unsafe_allow_html=True,
     )
 
+    st.markdown("<div class='section-mini-title'>② 永續表現分級（純評衣物本身對地球之友善度）</div>", unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div class="eco-grid">
+            <div class="rubric-card risk-low">
+                <div class="rubric-title">🌿 A 級｜標竿永續</div>
+                <div class="rubric-body">具 <strong>GOTS、IVN BEST、MADE IN GREEN、bluesign PRODUCT、C2C、EU Ecolabel 或成衣級 GRS 4.0</strong> 等全面性認證，且屬第一級單一純質，無高負擔紅旗。</div>
+            </div>
+            <div class="rubric-card risk-b">
+                <div class="rubric-title">🌱 B 級｜日常友善</div>
+                <div class="rubric-body">屬<strong>第一級 100% 單一純質天然纖維</strong>（純棉、亞麻、授權萊賽爾等，零微塑膠、好回收、資訊透明；台灣在地製造更佳），未具全面性認證。</div>
+            </div>
+            <div class="rubric-card risk-mid">
+                <div class="rubric-title">🍂 C 級｜權衡待改善</div>
+                <div class="rubric-body">無毒害紅旗之<strong>第二級同屬性混紡</strong>；或 <strong>100% 純聚酯／尼龍</strong>（含大廠再生聚酯，具微塑膠與難分解權衡）；或網購部分資訊未寫清。</div>
+            </div>
+            <div class="rubric-card risk-high">
+                <div class="rubric-title">🪨 D 級｜高環境負擔</div>
+                <div class="rubric-body">觸發任一紅旗：無全面認證之<strong>第三級異質混紡或含彈性纖維</strong>、<strong>PVC、壓克力纖維、無來源一般嫘縈、PFAS 含氟塗層、僅限乾洗</strong>或賣場完全黑箱。</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.caption("📚 永續表現四級係參考歐盟 PEFCR v3.1、法國 Ecobalyse 核心指標、Textile Exchange PFMM 與 Made-By 纖維基準轉化，僅供消費端快速體檢參考。")
+
     if not compact:
         st.markdown("#### 🔎 三大核心查核支柱")
         c1, c2, c3 = st.columns(3)
         c1.markdown(
             """
             <div class="pillar-card">
-                <div class="pillar-title">1. 透明揭露與認證加分</div>
-                <div class="pillar-text">日常服飾多無標章，認證屬信任加分項；若網購賣場未標示成分或產地，系統會自動產生賣家私訊提問範本。</div>
+                <div class="pillar-title">1. 認證分層與透明揭露</div>
+                <div class="pillar-text">區分「全面性成衣認證」與「單一屬性認證（如 OEKO-TEX 100、BCI）」；網購賣場缺比例或產地時自動產生賣家提問範本。</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -984,7 +1053,7 @@ def render_scoring_guide(compact: bool = False) -> None:
             """
             <div class="pillar-card">
                 <div class="pillar-title">3. 七宗罪與延壽洗護</div>
-                <div class="pillar-text">拆解耗水、微塑膠與漂綠話術，並提供單次穿著成本計算、專屬洗護延壽與台灣在地汰換指引。</div>
+                <div class="pillar-text">拆解耗水、微塑膠與高負擔紅旗，並提供單次穿著成本計算、專屬洗護延壽與台灣在地汰換指引。</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1042,6 +1111,8 @@ def render_report_dashboard(record: dict) -> None:
     sections = parse_report_sections(report_text)
     kpi = extract_kpi_summary(report_text, sections)
     sdata = record.get("sustain_data") or parse_sustain_data("", report_text, sections, kpi, is_online_mode)
+    if "eco_grade" not in sdata:
+        sdata = {**sdata, "eco_grade": parse_sustain_data("", report_text, sections, kpi, is_online_mode)["eco_grade"]}
 
     top_l, top_r = st.columns([3, 1.2])
     top_l.success(f"✅ 分析完成（總耗時 **{elapsed:.1f}** 秒）")
@@ -1050,7 +1121,7 @@ def render_report_dashboard(record: dict) -> None:
     if record.get("truncated"):
         st.warning("⚠️ 本次報告內容較長，末尾可能受限於單次輸出上限而略微截斷；建議可重新分析或精簡輸入文字。")
 
-    render_kpi_cards(kpi)
+    render_kpi_cards(kpi, sdata)
     render_sustain_dimensions(sdata)
     st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
@@ -1462,8 +1533,11 @@ section[data-testid="stSidebar"]{background-color:#EEECE4;border-right:1px solid
 .tag-best{display:inline-block;background:#E3F3EA;color:#1E6542;font-size:.7rem;padding:1px 6px;border-radius:999px;margin-left:4px}
 .risk-high{border-color:#E7C6C4;border-left-color:#C93B3B!important;border-top-color:#C93B3B!important;background:#FFFBFB}
 .risk-mid{border-color:#EADBB5;border-left-color:#C98A1B!important;border-top-color:#C98A1B!important;background:#FFFDF7}
+.risk-b{border-color:#CBE2D8;border-left-color:#3F8267!important;border-top-color:#3F8267!important;background:#F7FCF9}
 .risk-low{border-color:#C3DEC9;border-left-color:#2A7B52!important;border-top-color:#2A7B52!important;background:#F9FDFB}
 .risk-neutral{border-color:#DAD8CE;border-left-color:#6C7A72!important;border-top-color:#6C7A72!important}
+.eco-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem;margin-bottom:.65rem}
+@media (max-width:768px){.eco-grid{grid-template-columns:1fr}}
 .stButton>button[kind="primary"]{background-color:#23533E!important;border-color:#23533E!important;color:#FFFFFF!important;border-radius:10px;font-weight:600;padding:.55rem 1rem}
 .stButton>button[kind="primary"]:hover{background-color:#1A3F2F!important;border-color:#1A3F2F!important}
 [data-testid="stImage"] img{max-height:140px!important;width:auto!important;max-width:100%!important;object-fit:contain!important;border-radius:8px;border:1px solid #dcd9ce;padding:3px;background:#fff}
@@ -1476,8 +1550,8 @@ with st.sidebar:
     st.header("🌿 工具簡介")
     st.markdown(
         "協助消費者快速比對服飾的**品牌環保宣稱**與**實際材質成分**，涵蓋完整永續體檢：\n"
+        "- **雙核心評分**：漂綠風險 3 檔 × 永續表現 A～D 4 級\n"
         "- **網購免水洗標快篩**：沒標籤也能查缺漏並生成賣家提問\n"
-        "- **4 大永續體檢維度**：透明度、循環力、誠實度與認證加分\n"
         "- **混紡回收與環境足跡**：解析三級回收、耗水與微塑膠風險\n"
         "- **延壽洗護與在地汰換**：單次穿著成本計算與台灣循環去處"
     )
