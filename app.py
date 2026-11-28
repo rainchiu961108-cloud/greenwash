@@ -211,8 +211,57 @@ def get_kb_signature(kb_folder: str) -> tuple[tuple[str, int, int], ...]:
     return tuple(sig)
 
 
+_KB_CARD_PREFIXES = ("【總綱：", "【大廠查核：", "【國際纖維：", "【驗證機構：")
+_ONDEMAND_STOP_TOKENS = frozenset({
+    "集團", "實業", "興業", "公司", "團隊", "台灣", "美國", "義大利", "奧地利",
+    "日本", "德國", "原杜邦", "再生尼龍", "生質", "纖維", "涼爽紗", "cu", "ptt",
+})
+
+
+def _norm_kb_match(text: str) -> str:
+    """正規化文字供大廠與驗證機構名稱比對（統一臺/台、去除商標符號並轉小寫）"""
+    return (
+        text.replace("臺", "台")
+        .replace("é", "e")
+        .replace("É", "e")
+        .replace("®", "")
+        .replace("™", "")
+        .lower()
+    )
+
+
+def _is_ondemand_kb(fname: str) -> bool:
+    """判斷是否為按需命中載入之大廠與機構字典（未提及廠牌時零字數負擔）"""
+    low = fname.lower()
+    return fname.startswith("04_") or "fiber_brands" in low or "certifiers" in low
+
+
+def _extract_card_triggers(card_text: str) -> tuple[str, ...]:
+    """從原子卡片首行標題（【類型：名詞...】）萃取出專屬檢索觸發詞"""
+    first_line = card_text.splitlines()[0].strip()
+    if "：" not in first_line:
+        return ()
+    inner = first_line.split("：", 1)[1].rstrip("】")
+    tokens = []
+    for part in re.split(r"[｜／（）()、]+", inner):
+        tok = _norm_kb_match(part).strip()
+        if len(tok) >= 2 and tok not in _ONDEMAND_STOP_TOKENS:
+            tokens.append(tok)
+    return tuple(dict.fromkeys(tokens))
+
+
+def _card_matches_query(triggers: tuple[str, ...], norm_query: str) -> bool:
+    for tok in triggers:
+        if tok.isascii() and len(tok) <= 4:
+            if re.search(rf"(?<![a-z0-9]){re.escape(tok)}(?![a-z0-9])", norm_query):
+                return True
+        elif tok in norm_query:
+            return True
+    return False
+
+
 def extract_docx_chunks(filepath: str, target_chunk_size: int = 450) -> tuple[tuple[int, str], ...]:
-    """以標準庫直讀 .docx 段落與表格並切塊（零額外套件依賴）"""
+    """以標準庫直讀 .docx 段落與表格並切塊（零額外套件依賴，支援原子卡片完整不截斷）"""
     with zipfile.ZipFile(filepath) as zf:
         root = ET.fromstring(zf.read("word/document.xml"))
 
@@ -240,9 +289,17 @@ def extract_docx_chunks(filepath: str, target_chunk_size: int = 450) -> tuple[tu
 
     chunks, buf, buf_len = [], [], 0
     for line in lines:
+        in_card = bool(buf and buf[0].startswith(_KB_CARD_PREFIXES))
+        if buf and (
+            line.startswith(_KB_CARD_PREFIXES)
+            or (in_card and line.startswith(("一、", "二、", "三、")))
+        ):
+            chunks.append((len(chunks), "\n".join(buf)))
+            buf, buf_len = [], 0
+            in_card = False
         buf.append(line)
         buf_len += len(line)
-        if buf_len >= target_chunk_size:
+        if not in_card and not buf[0].startswith(_KB_CARD_PREFIXES) and buf_len >= target_chunk_size:
             chunks.append((len(chunks), "\n".join(buf)))
             buf, buf_len = [], 0
     if buf:
@@ -256,7 +313,7 @@ def load_local_knowledge_bases(
     kb_folder: str,
     files_sig: tuple[tuple[str, int, int], ...],
 ) -> tuple[tuple[str, ...], dict[str, tuple[tuple[int, str], ...]], tuple[str, ...]]:
-    """依檔案指紋快取解析結果，避免 Streamlit 每次互動重跑都重複解壓 9 萬字 Word 檔"""
+    """依檔案指紋快取解析結果，避免 Streamlit 每次互動重跑都重複解壓 Word 檔"""
     loaded_files, chunks_by_file, warnings = [], {}, []
     for fname, _, _ in files_sig:
         try:
@@ -274,18 +331,47 @@ def retrieve_relevant_kb_context(
     claim_text: str,
     per_file_char_limit: int = KB_PER_FILE_LIMIT,
 ) -> str:
-    """從本地知識庫依核心關鍵詞與宣傳文案精準檢索條文，每檔上限約 2,800 字"""
+    """從本地知識庫依核心關鍵詞與宣傳文案精準檢索條文（大廠字典採「命中才載入」零額外負擔模式）"""
     if not chunks_by_file:
         return ""
 
+    has_claim = bool(claim_text.strip())
+    norm_query = _norm_kb_match(claim_text) if has_claim else ""
     user_terms = (
         tuple({w.lower() for w in (_EN_TERM_RE.findall(claim_text) + _ZH_TERM_RE.findall(claim_text))})
-        if claim_text.strip()
+        if has_claim
         else ()
     )
 
     sections = []
     for fname, chunks in chunks_by_file.items():
+        if _is_ondemand_kb(fname):
+            master_chunks = [txt for _, txt in chunks if "【總綱：" in txt]
+            if not has_claim:
+                if master_chunks:
+                    sections.append(f"【知識庫精選規則：{fname}】\n" + "\n---\n".join(master_chunks))
+                continue
+
+            matched_cards = []
+            for _, txt in chunks:
+                if "【總綱：" in txt or not txt.lstrip().startswith(_KB_CARD_PREFIXES):
+                    continue
+                if _card_matches_query(_extract_card_triggers(txt), norm_query):
+                    matched_cards.append(txt)
+
+            if not matched_cards:
+                continue
+
+            picked_od, used_od = [], 0
+            for txt in master_chunks + matched_cards:
+                if used_od + len(txt) <= per_file_char_limit or len(picked_od) <= len(master_chunks):
+                    picked_od.append(txt)
+                    used_od += len(txt)
+                if used_od >= per_file_char_limit:
+                    break
+            sections.append(f"【知識庫精選規則：{fname}】\n" + "\n---\n".join(picked_od))
+            continue
+
         scored = []
         for idx, txt in chunks:
             txt_lower = txt.lower()
